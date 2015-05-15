@@ -28,12 +28,16 @@ class NormalNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTestBase 
 
   it should "train a NaiveBayesClassifier" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
 
-    val learner = new NormalNaiveBayes()
+    val learner = new NormalNaiveBayesTwo()
+    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/Desktop/naiveB/testfile2.txt", "\n", "\t")
 
-    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/Desktop/testfile.txt", "\n", "\t")
+    val model = learner.fit(trainingDS)
 
-    learner.fit(trainingDS)
+    model.transform(env.fromElements("And this is god belief belief belief or not correct it is tragic tragedy"))
+
+    env.execute()
 
     /*
     val model = learner.fit(trainingDS)
