@@ -29,6 +29,9 @@ class NormalNaiveBayesTwo extends Learner[(String, String), NormalNaiveBayesMode
    val allWordsInClass : DataSet[(String, Int)] = singleWordsInClass.groupBy(0).reduce {
      (line1, line2) => (line1._1, line1._2, line1._3 + line2._3)}.map(line => (line._1, line._3))
 
+   allWordsInClass.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/allWordsInClass.txt", WriteMode.OVERWRITE)
+
+
    // Classname -> Word -> Count of that word -> Count of all words in class
    val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
      (single, all) => (single._1, single._2, single._3, all._2)
@@ -60,9 +63,9 @@ class NormalNaiveBayesTwo extends Learner[(String, String), NormalNaiveBayesMode
    // Classname -> Word -> P(w|c)
    val pwc : DataSet[(String, String, Double)] = wordsInClass.map(line => (line._1, line._2, ((line._3 + 1) / (line._4 + vocabularyCount))))
 
-   // Classname -> Word -> P(w|c) -> P(c) -> p(w|c) not in class
+   // Classname -> Word -> log(P(w|c)) -> log(P(c)) -> log(p(w|c)) not in class
    val probabilityDataSet = pwc.join(classInfo).where(0).equalTo(0) {
-     (pwc, classInfo) => (pwc._1, pwc._2, pwc._3, classInfo._2, classInfo._3)
+     (pwc, classInfo) => (pwc._1, pwc._2, Math.log(pwc._3), Math.log(classInfo._2), Math.log(classInfo._3))
    }
 
 
@@ -135,32 +138,62 @@ class NormalNaiveBayesModelTwo(probabilityDataSet: DataSet[(String, String, Doub
 class NormalNaiveBayesModelTwoOneString(probabilityDataSet: DataSet[(String, String, Double, Double, Double)]) extends Transformer[String, (String, String)] {
   override def transform(input: DataSet[String], transformParameters: ParameterMap): DataSet[(String, String)] = {
 
-    //split input text in words
-    val words: DataSet[(String, Int)] = input.flatMap { _.split(" ") }.map{line => (line, 1)}.groupBy(0).sum(1)
+    val words : DataSet[(String)] = input.flatMap { _.split(" ") }
 
-    //join probabilityDataSet and words to classname -> Word -> wordcount in document -> P(w|c) -> P(c) -> p(w|c) not in class
-    val joinedWords = words.join(probabilityDataSet).where(0).equalTo(1) {
+    val wordsInInput = words.count()
+
+    //split input text in words
+    val wordsAndCount: DataSet[(String, Int)] = words.map{line => (line, 1)}.groupBy(0).sum(1)
+
+    //join probabilityDataSet and words to classname -> Word -> wordcount in document -> log(P(w|c)) -> log(P(c)) -> log(p(w|c)) not in class
+    val joinedWords = wordsAndCount.join(probabilityDataSet).where(0).equalTo(1) {
       (words, probabilityDataSet) => (probabilityDataSet._1, words._1, words._2, probabilityDataSet._3, probabilityDataSet._4, probabilityDataSet._5)
     }
 
+    joinedWords.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/joinedWords.txt", WriteMode.OVERWRITE)
+
     //calculate sumpwc for found words
-      // 1. Map: only needed information class -> wordcount in document (each word) *  p(w|c) each word
-      // 2. sum p(w|c)
+      // 1. Map: only needed information: class -> wordcount in document (each word) *  log(p(w|c)) each word
+      // 2. Group-Reduce: sum log(p(w|c))
     val sumPwcFoundWords : DataSet[(String, Double)] = joinedWords.map(line => (line._1, line._3 * line._4))
       .groupBy(0)
-      .reduce((line1, line2) => (line1._1, line1._2 + line2._2)) // class -> sum p(w|c) for all found verbs
+      .reduce((line1, line2) => (line1._1, line1._2 + line2._2)) // class -> sum log(p(w|c)) for all found words
 
     sumPwcFoundWords.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/sumPwcFoundWords.txt", WriteMode.OVERWRITE)
 
-    // class -> amount of words in that class
-    //val foundWordsForEachClass: DataSet[(String, Int)]
-    //calculate rest sumpwc for not found words
+    //calculate the amount of found words for each class
+      // 1. Map: only needed information: class -> wordcount in document (each word) -> log(p(w|c)) not in class
+      // 2. Group-Reduce: sum of wordcounts in document
+      // 3. Map: calculate sumPwcNotFound: class -> (words.count -  sumwordcount) * log(p(w|c)) not in class
+    val sumPwcNotFoundWords: DataSet[(String, Double)] = joinedWords.map(line => (line._1, line._3, line._6))
+      .groupBy(0)
+      .reduce((line1, line2) => (line1._1, line1._2 + line2._2, line1._3))
+      .map(line => (line._1, (wordsInInput - line._2) * line._3))// class -> sum log(p(w|c)) for all not found words
+
+    sumPwcNotFoundWords.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/sumPwcNotFoundWords.txt", WriteMode.OVERWRITE)
 
     //sum those pwc sums
+      // 1. Join sumPwcFoundWords and sumPwcNotFoundWords
+      // 2. Map: add sums from found words and sums from not found words
+    val sumPwc: DataSet[(String, Double)] = sumPwcFoundWords.join(sumPwcNotFoundWords).where(0).equalTo(0) {
+      (found, notfound) => (found._1, found._2 + notfound._2)
+    }
+
+    sumPwc.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/sumPwc.txt", WriteMode.OVERWRITE)
 
     //calculate possibility for each class
+      // 1. only needed information: class -> log(p(c))
+      // 2. Group-Reduce probabilitySet to one entry for each class
+      // 3. Join sumPwc with probability DataSet to get log(P(c))
+      // 4. Map: add sumPwc with log(P(c))
+    val possibility: DataSet[(String, Double)] = probabilityDataSet.map(line => (line._1, line._4))
+      .groupBy(0)
+      .reduce((line1, line2) => (line1._1, line1._2))
+      .join(sumPwc).where(0).equalTo(0) {
+      (prob, pwc) => (prob._1, prob._2 + pwc._2)
+      }
 
-    joinedWords.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/joinedWords.txt", WriteMode.OVERWRITE)
+    possibility.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/possibility.txt", WriteMode.OVERWRITE)
 
     return null
   }
