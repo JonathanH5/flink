@@ -35,8 +35,8 @@ class NormalNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTestBase 
     env.setParallelism(1)
 
     val learner = new NormalNaiveBayes()
-    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/Desktop/bayes/bbcTrain.csv", "\n", "\t")
-
+    //val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/Desktop/bayes/bbcTrain.csv", "\n", "\t")
+    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1/bbcTrain.csv", "\n", "\t")
 
     val model = learner.fit(trainingDS)
 
@@ -46,7 +46,8 @@ class NormalNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTestBase 
 
   }
 
-  it should "transform an input string" in {
+
+  it should "use the trained model to predict" in {
 
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
@@ -55,11 +56,15 @@ class NormalNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTestBase 
 
     val model = new NormalNaiveBayesModel(modelSet)
 
-    val solution = model.transform(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/Desktop/bayes/bbcTest.csv", "\n", "\t"))
+    //val solution = model.transform(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/Desktop/bayes/bbcTest.csv", "\n", "\t"))
+    val solution = model.transform(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1/bbcTest.csv", "\n", "\t"))
 
-    solution.writeAsCsv("/Users/jonathanhasenburg/Desktop/bayes/bbcTestComputedCategories.csv", "\n", "\t", WriteMode.OVERWRITE)
+    //solution.writeAsCsv("/Users/jonathanhasenburg/Desktop/bayes/bbcTestComputedCategories.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1/temporaryComputed.csv", "\n", "\t", WriteMode.OVERWRITE)
+
 
     env.execute()
 
   }
+
 }

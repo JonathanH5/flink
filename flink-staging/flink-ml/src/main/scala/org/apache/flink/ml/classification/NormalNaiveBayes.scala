@@ -1,8 +1,9 @@
 package org.apache.flink.ml.classification
 
 import java.lang.Iterable
+import java.util
 
-import org.apache.flink.api.common.functions.{ReduceFunction, RichMapPartitionFunction, FlatMapFunction}
+import org.apache.flink.api.common.functions.{RichMapFunction, ReduceFunction, RichMapPartitionFunction, FlatMapFunction}
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.core.fs.FileSystem.WriteMode
@@ -16,12 +17,22 @@ import scala.collection.mutable.Map
  */
 class NormalNaiveBayes extends Learner[(String, String), NormalNaiveBayesModel] with Serializable {
 
+  /*
+    While building the model different approaches need to get benchmarked.
+    For that purpose the fitParameters are used. Every possiblity in the code to choose one or option or another can be chocen by
+    using these parameters.
+
+      p1 = 0 -> use .count() to get amount of all documents
+      p1 = 1 -> use a ... to get amount of all documents
+
+   */
+
  override def fit(input: DataSet[(String, String)], fitParameters: ParameterMap): NormalNaiveBayesModel = {
 
    // Classname -> Count of documents
    val documentsPerClass: DataSet[(String, Int)] = input.map { line => (line._1, 1) }
      .groupBy(0)
-     .sum(1)
+       .sum(1)
 
    // Classname -> Word -> Count of that word
    val singleWordsInClass: DataSet[(String, String, Int)] = input.flatMap(new SingleWordSplitter())
@@ -37,8 +48,8 @@ class NormalNaiveBayes extends Learner[(String, String), NormalNaiveBayesModel] 
      (single, all) => (single._1, single._2, single._3, all._2)
    }
 
-   // Count of all documents
-   //val documentCount: Double = documentsPerClass.reduce((line1, line2) => (line1._1, line1._2 + line1._2)) // TODO -> aus documentsPerClass -> reduce and add
+   // Count of all documents POSSIBILITY 1
+   val documentsCount2: DataSet[(Double)] = documentsPerClass.reduce((line1, line2) => (line1._1, line1._2 + line2._2)).map(line => line._2) // TODO -> aus documentsPerClass -> reduce and add
    val documentsCount: Double= input.count()
 
    // All words, but distinct
@@ -51,10 +62,26 @@ class NormalNaiveBayes extends Learner[(String, String), NormalNaiveBayesModel] 
    //******************************************************************************************************************
    //calculate P(w) and P(w|c)
 
-   // Classname -> P(w) -> p(w|c) word not in class
+   // Classname -> P(w)  in class POSSIBILITY 1
    val pw: DataSet[(String, Double)] = documentsPerClass.map(line => (line._1, line._2 / documentsCount))
+   pw.print()
+   val pw2: DataSet[(String, Double)] = documentsPerClass.map(new RichMapFunction[(String, Int), (String, Double)] {
 
-   // Classname -> Pwc word not in class
+     var broadcastSet: util.List[Double] = null
+
+     override def open(config: Configuration): Unit = {
+       broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("documentCount")
+       //TODO Test size of broadCast Set
+     }
+
+     override def map(value: (String, Int)): (String, Double) = {
+       return (value._1, value._2 / broadcastSet.get(0))
+     }
+   }).withBroadcastSet(documentsCount2, "documentCount")
+
+   pw2.print()
+
+   // Classname -> P(w|c) word not in class
    val pwcNotInClass : DataSet[(String, Double)] = allWordsInClass.map(line => (line._1, 1 / (line._2 + vocabularyCount)))
    pwcNotInClass.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/pwcNotInClass.txt", WriteMode.OVERWRITE)
 
