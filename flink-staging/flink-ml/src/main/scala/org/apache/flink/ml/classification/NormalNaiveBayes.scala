@@ -142,18 +142,17 @@ object NormalNaiveBayes {
 
 
           case None => {
-            throw new RuntimeException("The MultipleLinearRegression has not been fitted to the " +
-              "data. This is necessary to learn the weight vector of the linear function.")
+            throw new RuntimeException("The NormalNaiveBayes has not been fitted to the " +
+              "data. This is necessary before a prediction on other data can be made.")
           }
         }
       }
 
       /** Calculates the prediction for a single element given the model of the [[Predictor]].
-        * TODO I calculate the prediction for a hole dataset
         *
-        * @param input The unlabeled example on which we make the prediction TODO I renamed it to input
-        * @param probabilityDataSet The model representation of the prediciton algorithm TODO I renamed it to probabilityDataset
-        * @return A label for the provided example of type [[Prediction]]
+        * @param input The input dataset, Int -> String (ID -> Text)
+        * @param probabilityDataSet The model representation based on a fitted train set
+        * @return The output dataset, Int -> String (ID -> Text)
         */
       override def predict(input: inputD, probabilityDataSet: DataSet[(String, String, Double, Double, Double)]): DataSet[(Int, String)] = {
 
@@ -215,6 +214,8 @@ object NormalNaiveBayes {
         }
 
         val calculatedClasses: DataSet[(Int, String)] = possibility.groupBy(0).reduce(new CalculateReducer()).map(line => (line._1, line._2))
+
+        //TODO -> Wie "liefere" ich das Ergebnis?
       }
     }
 
