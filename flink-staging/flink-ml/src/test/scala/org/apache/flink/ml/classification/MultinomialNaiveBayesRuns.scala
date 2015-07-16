@@ -18,43 +18,44 @@
 
 package org.apache.flink.ml.classification
 
-import org.apache.flink.api.java.DataSet
 import org.apache.flink.api.scala._
 import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.test.util.FlinkTestBase
 import org.scalatest.{FlatSpec, Matchers}
 
-class NormalNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTestBase {
+class MultinomialNaiveBayesRuns extends FlatSpec with Matchers with FlinkTestBase {
 
-  val saveLocationModel = "/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/model.csv"
+  val dataSetFolder = "/Users/jonathanhasenburg/OneDrive/datasets/bbc"
+  val runNumber = 3
 
-  behavior of "The NormalNaiveBayes implementation"
+  behavior of "The MultinomialNaiveBayes implementation"
 
-  it should "train a NaiveBayesClassifier" in {
+  it should "train the classifier with the basic configuration" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = NormalNaiveBayes()
+    val nnb = MultinomialNaiveBayes()
 
-    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTrain.csv", "\n", "\t")
-    nnb.fit(trainingDS);
-    nnb.saveModelDataSet(saveLocationModel)
+    val trainingDS = env.readCsvFile[(String, String)](dataSetFolder + "/input/train.csv", "\n", "\t")
+    nnb.fit(trainingDS)
+    nnb.saveModelDataSet(dataSetFolder + "/runs/run"+runNumber+"/basicConfigModel.csv")
 
     env.execute()
   }
 
-  it should "use the trained model to predict" in {
+  it should "use the basicConfigModel model to predict" in {
 
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
 
-    val modelSet = env.readCsvFile[(String, String, Double, Double, Double)](saveLocationModel, "\n", "|")
+    val modelSet = env.readCsvFile[(String, String, Double, Double, Double)](dataSetFolder + "/runs/run" +
+      runNumber + "/basicConfigModel.csv", "\n", "|")
 
-    val nnb = NormalNaiveBayes()
-    nnb.loadModelDataSet(modelSet)
+    val nnb = MultinomialNaiveBayes()
+    nnb.setModelDataSet(modelSet)
 
-    val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTest.csv", "\n", "\t"))
+    val solution = nnb.predict(env.readCsvFile[(Int, String)](dataSetFolder + "/input/test.csv", "\n", "\t"))
 
-    solution.writeAsCsv("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTestComputedCategories.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(dataSetFolder + "/runs/run" + runNumber + "/computedCategories.csv", "\n", "\t", WriteMode.OVERWRITE)
 
     env.execute()
 

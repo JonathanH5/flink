@@ -1,93 +1,148 @@
 package org.apache.flink.ml.classification
 
-import java.lang.Iterable
 import java.util
 
-import org.apache.flink.api.common.functions.{RichMapFunction, ReduceFunction, RichMapPartitionFunction, FlatMapFunction}
+import org.apache.flink.api.common.functions.{RichMapFunction, ReduceFunction, FlatMapFunction}
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.ml.common._
-import org.apache.flink.ml.pipeline.{PredictDataSetOperation, PredictOperation, FitOperation, Predictor}
+import org.apache.flink.ml.pipeline.{PredictDataSetOperation, FitOperation, Predictor}
 import org.apache.flink.util.Collector
-import scala.collection.mutable.Map
 
 
-class NormalNaiveBayes extends Predictor[NormalNaiveBayes] {
+/**
+ * While building the model different approaches need to be compared.
+ * For that purpose the fitParameters are used. Every possibility that might enhance the implementation
+ * can be chosen separately by using the following list of parameters:
+ *
+ * Possibility 1: document count
+ *  P1 = 0 -> use .count() to get count of all documents
+ *  P1 = 1 -> use a reducer and a mapper to create a broadcast data set containing the count of all documents
+ *
+ * Possibility 2: all words in class (order of operators)
+ *  P2 = 0 -> first the reducer, than the mapper
+ *  P2 = 1 -> first the mapper, than the reducer
+ *
+ * TODO Enhance
+ */
+class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
+
+  import MultinomialNaiveBayes._
 
   //The model, that stores all needed information after the fitting phase
   var probabilityDataSet: Option[DataSet[(String, String, Double, Double, Double)]] = None
 
+  // ============================== Parameter configuration =========================================
+
+  def setP1(value: Int): MultinomialNaiveBayes = {
+    parameters.add(P1, value)
+    this
+  }
+
+  def setP2(value: Int): MultinomialNaiveBayes = {
+    parameters.add(P1, value)
+    this
+  }
+
+  // =============================================== Methods =========================================
+
+  /**
+   * Loads an already existing model created by the NaiveBayes algorithm. Requires the location
+   * of the model. The saved model must be a representation of the [[probabilityDataSet]].
+   * @param location, the location where the model should get stored
+   */
   def saveModelDataSet(location: String) : Unit = {
     probabilityDataSet.get.writeAsCsv(location, "\n", "|", WriteMode.OVERWRITE)
   }
 
-  def loadModelDataSet(loaded : DataSet[(String, String, Double, Double, Double)]) : Unit = {
+  /**
+   * Sets the [[probabilityDataSet]] to the given data set.
+   * @param loaded, the data set that gets loaded into the classifier
+   */
+  def setModelDataSet(loaded : DataSet[(String, String, Double, Double, Double)]) : Unit = {
     this.probabilityDataSet = Some(loaded)
   }
 
   //Configuration options
-
   //TODO setPossibility Method and more possiblities
 
-  /*
-    While building the model different approaches need to get benchmarked.
-    For that purpose the fitParameters are used. Every possiblity in the code to choose one or option or
-    another can be chocen by using these parameters.
-
-      p1 = 0 -> use .count() to get amount of all documents
-      p1 = 1 -> use a ... to get amount of all documents
-
-   */
 
 }
 
-object NormalNaiveBayes {
+object MultinomialNaiveBayes {
 
    // ======================================== Factory Methods =====================================
 
-  def apply(): NormalNaiveBayes = {
-    new NormalNaiveBayes()
+  def apply(): MultinomialNaiveBayes = {
+    new MultinomialNaiveBayes()
+  }
+
+  // ========================================== Parameters =========================================
+
+  case object P1 extends Parameter[Int] {
+    override val defaultValue: Option[Int] = Some(0)
+  }
+
+  case object P2 extends Parameter[Int] {
+    override val defaultValue: Option[Int] = Some(1)
   }
 
   // ====================================== Operations =============================================
 
   /**
-   * Trains the model to fit the training data. The resulting possibilityDataSet is stored in
-   * the [[NormalNaiveBayes]] instance.
+   * Trains the model to fit the training data. The resulting [[MultinomialNaiveBayes.probabilityDataSet]] is stored in
+   * the [[MultinomialNaiveBayes]] instance.
    */
 
-  implicit val fitNNB = new FitOperation[NormalNaiveBayes, (String, String)] {
-    override def fit(instance: NormalNaiveBayes,
+
+  implicit val fitNNB = new FitOperation[MultinomialNaiveBayes, (String, String)] {
+    /**
+     * The [[FitOperation]] used to create the model. Requires an instance of [[MultinomialNaiveBayes]], a [[ParameterMap]]
+     * and the input data set. This data set maps (string -> string) containing (label -> text, words separated by ",")
+     * @param instance
+     * @param fitParameters
+     * @param input
+     */
+    override def fit(instance: MultinomialNaiveBayes,
                      fitParameters: ParameterMap,
                      input: DataSet[(String, String)]): Unit = {
 
-      // Classname -> Count of documents
-      val documentsPerClass: DataSet[(String, Int)] = input.map { line => (line._1, 1)}
-        .groupBy(0)
-        .sum(1)
+      /**
+       * Count the amount of documents for each class.
+       * 1. Map: replace the document text by a 1
+       * 2. Group-Reduce: sum the 1s by class
+       */
+      val documentsPerClass: DataSet[(String, Int)] = input.map { input => (input._1, 1)}
+        .groupBy(0).sum(1) // (class name -> count of documents)
 
-      // Classname -> Word -> Count of that word
+      /**
+       * Count the amount of occurrences of each word for each class.
+       * 1. FlatMap: split the document into its words and add a 1 to each tuple
+       * 2. Group-Reduce: sum the 1s by class, word
+       */
       val singleWordsInClass: DataSet[(String, String, Int)] = input.flatMap(new SingleWordSplitter())
-        .groupBy(0, 1)
-        .sum(2)
+        .groupBy(0, 1).sum(2) // (class name -> word -> count of that word)
 
-      // Classname -> Count of all words in class
+
+      // TODO Possibility 2 (first reduce than map or the other way around)
       val allWordsInClass: DataSet[(String, Int)] = singleWordsInClass.groupBy(0).reduce {
-        (line1, line2) => (line1._1, line1._2, line1._3 + line2._3)
-      }.map(line => (line._1, line._3))
+        (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
+      }.map(singleWords => (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
 
-      // Classname -> Word -> Count of that word -> Count of all words in class
+      // (class name -> word -> count of that word -> count of all words in class)
       val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
         (single, all) => (single._1, single._2, single._3, all._2)
       }
 
-      // Count of all documents POSSIBILITY 1
-      val documentsCount2: DataSet[(Double)] = documentsPerClass.reduce((line1, line2) => (line1._1, line1._2 + line2._2)).map(line => line._2) // TODO -> aus documentsPerClass -> reduce and add
+      // (count of all documents)
+      // TODO Possibility 1
+      val documentsCount2: DataSet[(Double)] = documentsPerClass.reduce((line1, line2) => (line1._1, line1._2 + line2._2)).map(line => line._2)
       val documentsCount: Double = input.count()
 
-      // All words, but distinct
+      // (list of all words, but distinct)
       val vocabulary = singleWordsInClass.map(tuple => (tuple._2, 1)).distinct(0)
+      // (count of items in vocabulary list)
       val vocabularyCount: Double = vocabulary.count()
 
       println("Document count = " + documentsCount)
@@ -99,7 +154,7 @@ object NormalNaiveBayes {
       // Classname -> P(w) in class
       // TODO POSSIBILITY 1
       val pw: DataSet[(String, Double)] = documentsPerClass.map(line => (line._1, line._2 / documentsCount))
-      // TODO Possibility 2
+      // TODO Possibility 1
       val pw2: DataSet[(String, Double)] = documentsPerClass.map(new RichMapFunction[(String, Int), (String, Double)] {
 
         var broadcastSet: util.List[Double] = null
@@ -138,9 +193,9 @@ object NormalNaiveBayes {
 
   // Model (String, String, Double, Double, Double)
 
-  implicit def predictNNB = new PredictDataSetOperation[NormalNaiveBayes, (Int, String), (Int, String)]() {
+  implicit def predictNNB = new PredictDataSetOperation[MultinomialNaiveBayes, (Int, String), (Int, String)]() {
 
-    override def predictDataSet(instance: NormalNaiveBayes,
+    override def predictDataSet(instance: MultinomialNaiveBayes,
                                 predictParameters: ParameterMap,
                                 input: DataSet[(Int, String)]): DataSet[(Int, String)] = {
 
@@ -226,7 +281,7 @@ object NormalNaiveBayes {
 
   /**
    * Transforms a (String, String) tuple into a (String, String, Int)) tuple.
-   * The second string from the input gets split into its words, for each word a tuple is collected with the Int (count) 1
+   * The second string from the input gets split into its words, for each word a tuple is collected with the Int 1.
    */
   class SingleWordSplitter() extends FlatMapFunction[(String, String), (String, String, Int)] {
     override def flatMap(value: (String, String), out: Collector[(String, String, Int)]): Unit = {
