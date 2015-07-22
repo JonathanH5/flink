@@ -16,13 +16,15 @@ import org.apache.flink.util.Collector
  * For that purpose the fitParameters are used. Every possibility that might enhance the implementation
  * can be chosen separately by using the following list of parameters:
  *
- * Possibility 1: document count
+ * Possibility 1: way of calculating document count
  *  P1 = 0 -> use .count() to get count of all documents
  *  P1 = 1 -> use a reducer and a mapper to create a broadcast data set containing the count of all documents
  *
  * Possibility 2: all words in class (order of operators)
+ *    If p2 = 1 improves the speed, many other calculations must switch their operators, too.
  *  P2 = 0 -> first the reducer, than the mapper
  *  P2 = 1 -> first the mapper, than the reducer
+ *
  *
  * TODO Enhance
  */
@@ -72,12 +74,6 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
 object MultinomialNaiveBayes {
 
-   // ======================================== Factory Methods =====================================
-
-  def apply(): MultinomialNaiveBayes = {
-    new MultinomialNaiveBayes()
-  }
-
   // ========================================== Parameters =========================================
 
   case object P1 extends Parameter[Int] {
@@ -85,7 +81,13 @@ object MultinomialNaiveBayes {
   }
 
   case object P2 extends Parameter[Int] {
-    override val defaultValue: Option[Int] = Some(1)
+    override val defaultValue: Option[Int] = Some(0)
+  }
+
+  // ======================================== Factory Methods =====================================
+
+  def apply(): MultinomialNaiveBayes = {
+    new MultinomialNaiveBayes()
   }
 
   // ====================================== Operations =============================================
@@ -108,6 +110,8 @@ object MultinomialNaiveBayes {
                      fitParameters: ParameterMap,
                      input: DataSet[(String, String)]): Unit = {
 
+      val resultingParameters = instance.parameters ++ fitParameters
+
       /**
        * Count the amount of documents for each class.
        * 1. Map: replace the document text by a 1
@@ -125,59 +129,99 @@ object MultinomialNaiveBayes {
         .groupBy(0, 1).sum(2) // (class name -> word -> count of that word)
 
 
-      // TODO Possibility 2 (first reduce than map or the other way around)
-      val allWordsInClass: DataSet[(String, Int)] = singleWordsInClass.groupBy(0).reduce {
-        (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
-      }.map(singleWords => (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
+      //POSSIBILITY 2: all words in class (order of operators)
+      val p2 = resultingParameters(P2)
 
-      // (class name -> word -> count of that word -> count of all words in class)
-      val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
-        (single, all) => (single._1, single._2, single._3, all._2)
+      var allWordsInClass: DataSet[(String, Int)] = null // (class name -> count of all words in that class)
+
+      if (p2 == 0) {
+        /**
+         * Count all the words for each class.
+         * 1. Reduce: add the count for each word in a class together
+         * 2. Map: remove the field that contains the word
+         */
+        allWordsInClass = singleWordsInClass.groupBy(0).reduce {
+          (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
+        }.map(singleWords => (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
+      } else if (p2 == 1) {
+        /**
+         * Count all the words for each class.
+         * 1. Map: remove the field that contains the word
+         * 2. Reduce: add the count for each word in a class together
+         */
+        allWordsInClass = singleWordsInClass.map(singleWords => (singleWords._1, singleWords._3))
+          .groupBy(0).reduce {
+            (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2 + singleWords2._2)
+          } // (class name -> count of all words in that class)
       }
+      //END POSSIBILITY 2
 
-      // (count of all documents)
-      // TODO Possibility 1
-      val documentsCount2: DataSet[(Double)] = documentsPerClass.reduce((line1, line2) => (line1._1, line1._2 + line2._2)).map(line => line._2)
-      val documentsCount: Double = input.count()
+      //POSSIBILITY 1: way of calculating document count
+      val p1 = resultingParameters(P1)
+
+      var pc: DataSet[(String, Double)] = null // class name -> P(w) in class
+
+      if (p1 == 0) {
+        val documentsCount: Double = input.count() //count of all documents
+        /**
+         * Calculate P(c)
+         * 1. Map: divide count of documents for a class through total count of documents
+         */
+        pc = documentsPerClass.map(line => (line._1, line._2 / documentsCount))
+
+      } else if (p1 == 1) {
+        /**
+         * Create a data set that contains only one double value: the count of all documents
+         * 1. Reduce: At the count of documents together
+         * 2. Map: Remove field that contains document identifier
+         */
+        val documentCount: DataSet[(Double)] = documentsPerClass.reduce((line1, line2) => (line1._1, line1._2 + line2._2)).map(line => line._2) //(count of all documents)
+        /**
+         * Calculate P(c)
+         * 1. Map: divide count of documents for a class through total count of documents
+         *   (only element in documentCount data set)
+         */
+        pc = documentsPerClass.map(new RichMapFunction[(String, Int), (String, Double)] {
+
+            var broadcastSet: util.List[Double] = null
+
+            override def open(config: Configuration): Unit = {
+              broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("documentCount")
+              if (broadcastSet.size() != 1) {
+                throw new RuntimeException("The document count data set used by p1 = 1 has the wrong size! " +
+                  "Please use p1 = 0 if the problem can not be solved.")
+              }
+            }
+
+            override def map(value: (String, Int)): (String, Double) = {
+              (value._1, value._2 / broadcastSet.get(0))
+            }
+          }).withBroadcastSet(documentCount, "documentCount")
+      }
+      //END POSSIBILITY 1
 
       // (list of all words, but distinct)
       val vocabulary = singleWordsInClass.map(tuple => (tuple._2, 1)).distinct(0)
       // (count of items in vocabulary list)
       val vocabularyCount: Double = vocabulary.count()
 
-      println("Document count = " + documentsCount)
-      println("Vocabulary count = " + vocabularyCount)
-
-      //******************************************************************************************************************
-      //calculate P(w) and P(w|c)
-
-      // Classname -> P(w) in class
-      // TODO POSSIBILITY 1
-      val pw: DataSet[(String, Double)] = documentsPerClass.map(line => (line._1, line._2 / documentsCount))
-      // TODO Possibility 1
-      val pw2: DataSet[(String, Double)] = documentsPerClass.map(new RichMapFunction[(String, Int), (String, Double)] {
-
-        var broadcastSet: util.List[Double] = null
-
-        override def open(config: Configuration): Unit = {
-          broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("documentCount")
-          //TODO Test size of broadCast Set
-        }
-
-        override def map(value: (String, Int)): (String, Double) = {
-          (value._1, value._2 / broadcastSet.get(0))
-        }
-      }).withBroadcastSet(documentsCount2, "documentCount")
-
-
       // Classname -> P(w|c) word not in class
       val pwcNotInClass: DataSet[(String, Double)] = allWordsInClass.map(line => (line._1, 1 / (line._2 + vocabularyCount)))
       pwcNotInClass.writeAsText("/Users/jonathanhasenburg/Desktop/naiveB/pwcNotInClass.txt", WriteMode.OVERWRITE)
 
       // Classname -> p(c) -> p(w|c) not in class
-      val classInfo = pw.join(pwcNotInClass).where(0).equalTo(0) {
+      val classInfo = pc.join(pwcNotInClass).where(0).equalTo(0) {
         (line1, line2) => (line1._1, line1._2, line2._2)
       }
+
+      /**
+       *  Join the singleWordsInClass data set with the allWordsInClass data set to use the information for the
+       *  calculation of p(w|c)
+       */
+      //TODO Possibility 3, ALL WORDS IN CLASS AS BROADCAST SET
+      val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
+        (single, all) => (single._1, single._2, single._3, all._2)
+      } // (class name -> word -> count of that word -> count of all words in that class)
 
       // Classname -> Word -> P(w|c)
       val pwc: DataSet[(String, String, Double)] = wordsInClass.map(line => (line._1, line._2, ((line._3 + 1) / (line._4 + vocabularyCount))))

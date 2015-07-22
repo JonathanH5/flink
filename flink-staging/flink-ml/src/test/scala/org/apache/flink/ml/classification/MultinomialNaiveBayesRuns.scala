@@ -42,6 +42,57 @@ class MultinomialNaiveBayesRuns extends FlatSpec with Matchers with FlinkTestBas
     env.execute()
   }
 
+it should "train the classifier with p1 = 0" in {
+  val env = ExecutionEnvironment.getExecutionEnvironment
+  env.setParallelism(1)
+  val nnb = MultinomialNaiveBayes().setP1(0)
+
+  val trainingDS = env.readCsvFile[(String, String)](dataSetFolder + "/input/train.csv", "\n", "\t")
+  nnb.fit(trainingDS)
+  nnb.saveModelDataSet(dataSetFolder + "/runs/run"+runNumber+"/p1_0.csv")
+
+  env.execute()
+}
+
+it should "train the classifier with p1 = 1" in {
+  val env = ExecutionEnvironment.getExecutionEnvironment
+  env.setParallelism(1)
+  val nnb = MultinomialNaiveBayes().setP1(1)
+
+  val trainingDS = env.readCsvFile[(String, String)](dataSetFolder + "/input/train.csv", "\n", "\t")
+  nnb.fit(trainingDS)
+  nnb.saveModelDataSet(dataSetFolder + "/runs/run"+runNumber+"/p1_1.csv")
+
+  env.execute()
+}
+
+
+  /* WORKS
+  it should "train the classifier with p2 = 0" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
+    val nnb = MultinomialNaiveBayes().setP2(0)
+
+    val trainingDS = env.readCsvFile[(String, String)](dataSetFolder + "/input/train.csv", "\n", "\t")
+    nnb.fit(trainingDS)
+    nnb.saveModelDataSet(dataSetFolder + "/runs/run"+runNumber+"/p2_0.csv")
+
+    env.execute()
+  }
+
+  it should "train the classifier with p2 = 1" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
+    val nnb = MultinomialNaiveBayes().setP2(1)
+
+    val trainingDS = env.readCsvFile[(String, String)](dataSetFolder + "/input/train.csv", "\n", "\t")
+    nnb.fit(trainingDS)
+    nnb.saveModelDataSet(dataSetFolder + "/runs/run"+runNumber+"/p2_1.csv")
+
+    env.execute()
+  }
+  */
+
   it should "use the basicConfigModel model to predict" in {
 
     val env = ExecutionEnvironment.getExecutionEnvironment
