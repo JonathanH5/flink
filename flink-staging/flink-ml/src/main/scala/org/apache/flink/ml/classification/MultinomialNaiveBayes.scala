@@ -5,6 +5,7 @@ import java.util
 import org.apache.flink.api.common.functions.{ReduceFunction, FlatMapFunction, RichMapFunction}
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
+import org.apache.flink.core.fs.FileSystem
 import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.ml.common.{ParameterMap, Parameter}
 import org.apache.flink.ml.pipeline.{PredictDataSetOperation, FitOperation, Predictor}
@@ -12,8 +13,6 @@ import org.apache.flink.util.Collector
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-
-import scala.collection.mutable.Map
 
 /**
  * While building the model different approaches need to be compared.
@@ -39,8 +38,11 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
   import MultinomialNaiveBayes._
 
-  //The model, that stores all needed information after the fitting phase
-  var probabilityDataSet: Option[DataSet[(String, String, Double, Double, Double)]] = None
+  //The model, that stores all needed information that are related to one specific word
+  var wordRelatedModelData: Option[DataSet[(String, String, Double)]] = None // (class name -> word -> P(w|c))
+
+  //The model, that stores all needed information that are related to one specifc class+
+  var classRelatedModelData: Option[DataSet[(String, Double, Double)]] = None // (class name -> p(c) -> p(w|c) not in class)
 
   // ============================== Parameter configuration =========================================
 
@@ -62,25 +64,25 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
   // =============================================== Methods =========================================
 
   /**
-   * Loads an already existing model created by the NaiveBayes algorithm. Requires the location
-   * of the model. The saved model must be a representation of the [[probabilityDataSet]].
-   * @param location, the location where the model should get stored
+   * Save already existing model data created by the NaiveBayes algorithm. Requires the designated locations
+   * The saved data is a representation of the [[wordRelatedModelData]] and [[classRelatedModelData]].
+   * @param wordRelated, the save location for the wordRelated data
+   * @param classRelated, the save location for the classRelated data
    */
-  def saveModelDataSet(location: String) : Unit = {
-    probabilityDataSet.get.writeAsCsv(location, "\n", "|", WriteMode.OVERWRITE)
+  def saveModelDataSet(wordRelated: String, classRelated: String) : Unit = {
+    wordRelatedModelData.get.writeAsCsv(wordRelated, "\n", "|", WriteMode.OVERWRITE)
+    classRelatedModelData.get.writeAsCsv(classRelated, "\n", "|", WriteMode.OVERWRITE)
   }
 
   /**
-   * Sets the [[probabilityDataSet]] to the given data set.
-   * @param loaded, the data set that gets loaded into the classifier
+   * Sets the [[wordRelatedModelData]] and the [[classRelatedModelData]] to the given data sets.
+   * @param wordRelated, the data set representing the wordRelated model
+   * @param classRelated, the data set representing the classRelated model
    */
-  def setModelDataSet(loaded : DataSet[(String, String, Double, Double, Double)]) : Unit = {
-    this.probabilityDataSet = Some(loaded)
+  def setModelDataSet(wordRelated : DataSet[(String, String, Double)], classRelated: DataSet[(String, Double, Double)]) : Unit = {
+    this.wordRelatedModelData = Some(wordRelated)
+    this.classRelatedModelData = Some(classRelated)
   }
-
-  //Configuration options
-  //TODO setPossibility Method and more possiblities
-
 
 }
 
@@ -109,7 +111,7 @@ object MultinomialNaiveBayes {
   // ====================================== Operations =============================================
 
   /**
-   * Trains the model to fit the training data. The resulting [[MultinomialNaiveBayes.probabilityDataSet]] is stored in
+   * Trains the models to fit the training data. The resulting [[MultinomialNaiveBayes.wordRelatedModelData]] and [[MultinomialNaiveBayes.classRelatedModelData]] are stored in
    * the [[MultinomialNaiveBayes]] instance.
    */
 
@@ -213,12 +215,12 @@ object MultinomialNaiveBayes {
       //calculate the P(w|c) value for words, that are not part of a class (needed because of smoothing)
       // 1. Map: use P(w|c) formula with smoothing with n(c_j, w_t) = 0
       val pwcNotInClass: DataSet[(String, Double)] = allWordsInClass
-        .map(line => (line._1, 1 / (line._2 + vocabularyCount))) // class name -> P(w|c) word not in class
+        .map(line => (line._1, 1 / (line._2 + vocabularyCount))) // (class name -> P(w|c) word not in class)
 
       //POSSIBILITY 3: way of calculating pwc
       val p3 = resultingParameters(P3)
 
-      var pwc: DataSet[(String, String, Double)] = null // class name -> word -> P(w|c)
+      var pwc: DataSet[(String, String, Double)] = null // (class name -> word -> P(w|c))
 
       if (p3 == 0) {
 
@@ -254,18 +256,18 @@ object MultinomialNaiveBayes {
 
       }
 
+      //stores all the word related information in one data set
+      // 1. Map: Caluclate logarithms
+      val wordRelatedModelData = pwc.map(line => (line._1, line._2, Math.log(line._3)))
+
       //store all class related information in one data set
-      // 1. Join: P(c) data set and P(w|c) data set not in class
-      val classInfo = pc.join(pwcNotInClass).where(0).equalTo(0) {
-        (line1, line2) => (line1._1, line1._2, line2._2)
-      } // (class name -> p(c) -> p(w|c) not in class)
+      // 1. Join: P(c) data set and P(w|c) data set not in class and calculate logarithms
+      val classRelatedModelData = pc.join(pwcNotInClass).where(0).equalTo(0) {
+        (line1, line2) => (line1._1, Math.log(line1._2), Math.log(line2._2))
+      } // (class name -> log(P(c)) -> log(P(w|c) not in class))
 
-      //join the pwc data set with the classInfo data set to get one data set as representation of the model and calculate logarithms
-      val probabilityDataSet = pwc.join(classInfo).where(0).equalTo(0) {
-        (pwc, classInfo) => (pwc._1, pwc._2, Math.log(pwc._3), Math.log(classInfo._2), Math.log(classInfo._3))
-      } // (class name -> word -> log(P(w|c)) -> log(P(c)) -> log(p(w|c)) not in class)
-
-      instance.probabilityDataSet = Some(probabilityDataSet)
+      instance.wordRelatedModelData = Some(wordRelatedModelData)
+      instance.classRelatedModelData = Some(classRelatedModelData)
     }
   }
 
@@ -276,12 +278,13 @@ object MultinomialNaiveBayes {
                                 predictParameters: ParameterMap,
                                 input: DataSet[(Int, String)]): DataSet[(Int, String)] = {
 
-      if (instance.probabilityDataSet.isEmpty) {
+      if (instance.wordRelatedModelData.isEmpty || instance.classRelatedModelData.isEmpty) {
         throw new RuntimeException("The NormalNaiveBayes has not been fitted to the " +
             "data. This is necessary before a prediction on other data can be made.")
       }
 
-      val probabilityDataSet = instance.probabilityDataSet.get
+      val wordRelatedModelData = instance.wordRelatedModelData.get
+      val classRelatedModelData = instance.classRelatedModelData.get
 
       //split the texts from the input data set into its words
       val words: DataSet[(Int, String)] = input.flatMap {
@@ -296,29 +299,43 @@ object MultinomialNaiveBayes {
       //calculate the count of all words for a text identified by its key
       val wordsInText: DataSet[(Int, Int)] = wordsAndCount.map(line => (line._1, line._3)).groupBy(0).sum(1) //(id -> all words in text)
 
-      //join probabilityDataSet and words
-      val joinedWords = wordsAndCount.join(probabilityDataSet).where(1).equalTo(1) {
-        (words, probabilityDataSet) => (words._1, probabilityDataSet._1, words._2, words._3, probabilityDataSet._3, probabilityDataSet._4, probabilityDataSet._5)
-      } //(id -> class name -> word -> wordc ount in text (each word) -> log(P(w|c)) -> log(P(c)) -> log(p(w|c)) not in class)
+      //generate a data set containing all words that are in model for each id, class pair
+      // 1. Join: wordRelatedModelData with wordsAndCount on words (id -> class -> word count -> log(P(w|c))
+      val foundWords: DataSet[(Int, String, Int, Double)] = wordRelatedModelData.join(wordsAndCount).where(1).equalTo(1) {
+        (wordR, wordsAC) => (wordsAC._1, wordR._1, wordsAC._3, wordR._3)
+      }
 
       //calculate sumpwc for found words
-      // 1. Map: only needed information: id -> class -> word count in text (each word) *  log(p(w|c)) each word
-      // 2. Group-Reduce: sum log(p(w|c))
-      val sumPwcFoundWords: DataSet[(Int, String, Double)] = joinedWords.map(line => (line._1, line._2, line._4 * line._5))
-        .groupBy(0, 1)
-        .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3)) // (id -> class -> sum log(p(w|c)) for all found words in class)
+      // 1. Map: Remove unneded information from foundWords and calculate the sumP(w|c) for each word (id -> class -> log(P(w|c) * word count)
+      // 2. Group-Reduce: on id and class, sum all (log(P(w|c)) * word count) results
+      val sumPwcFoundWords: DataSet[(Int, String, Double)] = foundWords.map(line => (line._1, line._2, line._3 * line._4))
+        .groupBy(0, 1).reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
 
-      //calculate the amount of found words for each class
-      // 1. Map: only needed information: id -> class -> word count in text (each word) -> log(p(w|c)) not in class
-      // 2. Group-Reduce: sum of word counts in text
-      // 3. Join with wordsInText to get the count of all words per text
-      // 4. Map: calculate sumPwcNotFound: id -> class -> (word counts in text -  wordsInText) * log(p(w|c)) not in class
-      val sumPwcNotFoundWords: DataSet[(Int, String, Double)] = joinedWords.map(line => (line._1, line._2, line._4, line._7))
+      //calculate sumwpc for words that are not in model in that class
+      // 1. Map: Discard log(P(w|c) from foundWords
+      // 2. Group-Reduce: calculate sum count of found words for each document, class pair (id -> class -> sum(wordCount))
+      // 3. Join: with wordsInText on id, to get the count of all words per document
+      // 4. Map: calculate sumPWcNotFound (id -> class -> (all words in document - found word in document) * log(P(w|c) not in class (provided by broadcast)
+      val sumPwcNotFoundWords: DataSet[(Int, String, Double)] = foundWords.map(line => (line._1, line._2, line._3))
         .groupBy(0, 1)
-        .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3, line1._4))
+        .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
         .join(wordsInText).where(0).equalTo(0) {
-        (line1, line2) => (line1._1, line1._2, line1._3, line1._4, line2._2)
-      }.map(line => (line._1, line._2, (line._5 - line._3) * line._4)) // (id -> class -> sum log(p(w|c)) for all not found words)
+        (foundW, wordsIT) => (foundW._1, foundW._2, foundW._3, wordsIT._2)
+      }.map(new RichMapFunction[(Int, String, Int, Int), (Int, String, Double)] {
+
+        var broadcastMap: mutable.Map[String, Double] = mutable.Map[String, Double]() //class -> log(P(w|c) not found word in class)
+
+        override def open(config: Configuration): Unit = {
+          val collection = getRuntimeContext.getBroadcastVariable[(String, Double, Double)]("classRelatedModelData").asScala
+          for (record <- collection) {
+            broadcastMap.put(record._1, record._3)
+          }
+        }
+
+        override def map(value: (Int, String, Int, Int)): (Int, String, Double) = {
+          (value._1, value._2, (value._4 - value._3) * broadcastMap(value._2))
+        }
+      }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
 
       //sum those pwc sums
       // 1. Join sumPwcFoundWords and sumPwcNotFoundWords
@@ -327,17 +344,23 @@ object MultinomialNaiveBayes {
         (found, notfound) => (found._1, found._2, found._3 + notfound._3)
       } //(id -> class name -> sum log(p(w|c)))
 
-      //calculate possibility for each class
-      // 1. Map: only needed information: (class -> log(P(c))
-      // 2. Group-Reduce: probabilitySet to one entry for each class
-      // 3. Join: sumPwc with probability DataSet to get log(P(c))
-      // 4. Map: add sumPwc with log(P(c))
-      val possibility: DataSet[(Int, String, Double)] = probabilityDataSet.map(line => (line._1, line._4))
-        .groupBy(0)
-        .reduce((line1, line2) => (line1._1, line1._2))
-        .join(sumPwc).where(0).equalTo(1) {
-        (prob, pwc) => (pwc._1, prob._1, prob._2 + pwc._3)
-      } //(id -> class -> probability)
+      //calcualte possibility for each class
+      // 1. Map: add sumPwc values with log(P(c)) (provided by broadcast
+      val possibility: DataSet[(Int, String, Double)] = sumPwc.map(new RichMapFunction[(Int, String, Double),(Int, String, Double)] {
+
+        var broadcastMap: mutable.Map[String, Double] = mutable.Map[String, Double]() //class -> log(P(c))
+
+        override def open(config: Configuration): Unit = {
+          val collection = getRuntimeContext.getBroadcastVariable[(String, Double, Double)]("classRelatedModelData").asScala
+          for (record <- collection) {
+            broadcastMap.put(record._1, record._2)
+          }
+        }
+
+        override def map(value: (Int, String, Double)): (Int, String, Double) = {
+          (value._1, value._2, value._3 + broadcastMap(value._2))
+        }
+      }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
 
       //choose the highest probable class
       // 1. Reduce: keep only highest probability

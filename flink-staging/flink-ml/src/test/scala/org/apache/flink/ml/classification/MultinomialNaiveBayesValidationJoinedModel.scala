@@ -85,7 +85,6 @@ class MultinomialNaiveBayesValidationJoinedModel extends FlatSpec with Matchers 
 
   }
 
-
   it should "train the classifier with p1 = 0" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
@@ -355,6 +354,5 @@ class MultinomialNaiveBayesValidationJoinedModel extends FlatSpec with Matchers 
   it should "delete the tmp folder" in {
     FileUtils.deleteDirectory(new File(outputFolder));
   }
-
 
 }
