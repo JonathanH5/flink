@@ -29,21 +29,21 @@ import org.scalatest.{FlatSpec, Matchers}
 import scala.util.Sorting
 
 /**
- * This test is used to compare whether the different versions of [[MultinomialNaiveBayes]] resulting
+ * This test is used to compare whether the different versions of [[MultinomialNaiveBayesJoinedModel]] resulting
  * of the chooseable "possibilities" give the same result, what they should.
  */
-class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkTestBase {
+class MultinomialNaiveBayesValidationJoinedModel extends FlatSpec with Matchers with FlinkTestBase {
 
   val outputFolder = "/Users/jonathanhasenburg/Desktop/TestOutput/"
 
 
-  behavior of "The MultinomialNaiveBayes implementation"
+  behavior of "The MultinomialNaiveBayesJoinedModel implementation"
 
 
   it should "train the classifier with the basic configuration" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes()
+    val nnb = MultinomialNaiveBayesJoinedModel()
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -58,7 +58,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
 
-    val nnb = MultinomialNaiveBayes()
+    val nnb = MultinomialNaiveBayesJoinedModel()
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/basicConfigModel.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
@@ -89,7 +89,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
   it should "train the classifier with p1 = 0" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setP1(0)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP1(0)
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -105,7 +105,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
 
-    val nnb = MultinomialNaiveBayes().setP2(0)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP2(0)
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/p1_0Model.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
@@ -119,7 +119,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
   it should "train the classifier with p1 = 1" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setP1(1)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP1(1)
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -135,7 +135,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
 
-    val nnb = MultinomialNaiveBayes().setP2(1)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP2(1)
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/p1_1Model.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
@@ -178,7 +178,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
   it should "train the classifier with p2 = 0" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setP2(0)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP2(0)
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -194,7 +194,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
 
-    val nnb = MultinomialNaiveBayes().setP2(0)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP2(0)
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/p2_0Model.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
@@ -208,7 +208,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
   it should "train the classifier with p2 = 1" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setP2(1)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP2(1)
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -224,7 +224,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
 
-    val nnb = MultinomialNaiveBayes().setP2(1)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP2(1)
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/p2_1Model.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
@@ -266,7 +266,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
   it should "train the classifier with p3 = 0" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setP3(0)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP3(0)
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -282,7 +282,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
 
-    val nnb = MultinomialNaiveBayes().setP3(0)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP3(0)
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/p3_0Model.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
@@ -296,7 +296,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
   it should "train the classifier with p3 = 1" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setP3(1)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP3(1)
 
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
@@ -312,7 +312,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
 
-    val nnb = MultinomialNaiveBayes().setP3(1)
+    val nnb = MultinomialNaiveBayesJoinedModel().setP3(1)
     nnb.setModelDataSet(env.readCsvFile[(String, String, Double, Double, Double)](outputFolder+"/p3_1Model.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
