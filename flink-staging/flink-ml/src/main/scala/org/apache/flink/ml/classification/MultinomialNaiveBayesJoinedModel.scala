@@ -35,26 +35,26 @@ import scala.collection.mutable.Map
  *
  * TODO Enhance
  */
-class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
+class MultinomialNaiveBayesJoinedModel extends Predictor[MultinomialNaiveBayesJoinedModel] {
 
-  import MultinomialNaiveBayes._
+  import MultinomialNaiveBayesJoinedModel._
 
   //The model, that stores all needed information after the fitting phase
   var probabilityDataSet: Option[DataSet[(String, String, Double, Double, Double)]] = None
 
   // ============================== Parameter configuration =========================================
 
-  def setP1(value: Int): MultinomialNaiveBayes = {
+  def setP1(value: Int): MultinomialNaiveBayesJoinedModel = {
     parameters.add(P1, value)
     this
   }
 
-  def setP2(value: Int): MultinomialNaiveBayes = {
+  def setP2(value: Int): MultinomialNaiveBayesJoinedModel = {
     parameters.add(P2, value)
     this
   }
 
-  def setP3(value: Int): MultinomialNaiveBayes = {
+  def setP3(value: Int): MultinomialNaiveBayesJoinedModel = {
     parameters.add(P3, value)
     this
   }
@@ -84,7 +84,7 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
 }
 
-object MultinomialNaiveBayes {
+object MultinomialNaiveBayesJoinedModel {
 
   // ========================================== Parameters =========================================
 
@@ -102,27 +102,27 @@ object MultinomialNaiveBayes {
 
   // ======================================== Factory Methods =====================================
 
-  def apply(): MultinomialNaiveBayes = {
-    new MultinomialNaiveBayes()
+  def apply(): MultinomialNaiveBayesJoinedModel = {
+    new MultinomialNaiveBayesJoinedModel()
   }
 
   // ====================================== Operations =============================================
 
   /**
-   * Trains the model to fit the training data. The resulting [[MultinomialNaiveBayes.probabilityDataSet]] is stored in
-   * the [[MultinomialNaiveBayes]] instance.
+   * Trains the model to fit the training data. The resulting [[MultinomialNaiveBayesJoinedModel.probabilityDataSet]] is stored in
+   * the [[MultinomialNaiveBayesJoinedModel]] instance.
    */
 
 
-  implicit val fitNNB = new FitOperation[MultinomialNaiveBayes, (String, String)] {
+  implicit val fitNNB = new FitOperation[MultinomialNaiveBayesJoinedModel, (String, String)] {
     /**
-     * The [[FitOperation]] used to create the model. Requires an instance of [[MultinomialNaiveBayes]], a [[ParameterMap]]
+     * The [[FitOperation]] used to create the model. Requires an instance of [[MultinomialNaiveBayesJoinedModel]], a [[ParameterMap]]
      * and the input data set. This data set maps (string -> string) containing (label -> text, words separated by ",")
-     * @param instance of [[MultinomialNaiveBayes]]
+     * @param instance of [[MultinomialNaiveBayesJoinedModel]]
      * @param fitParameters, additional parameters
      * @param input, the to processed data set
      */
-    override def fit(instance: MultinomialNaiveBayes,
+    override def fit(instance: MultinomialNaiveBayesJoinedModel,
                      fitParameters: ParameterMap,
                      input: DataSet[(String, String)]): Unit = {
 
@@ -159,8 +159,8 @@ object MultinomialNaiveBayes {
         // 2. Reduce: add the count for each word in a class together
         allWordsInClass = singleWordsInClass.map(singleWords => (singleWords._1, singleWords._3))
           .groupBy(0).reduce {
-            (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2 + singleWords2._2)
-          } // (class name -> count of all words in that class)
+          (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2 + singleWords2._2)
+        } // (class name -> count of all words in that class)
       }
       //END POSSIBILITY 2
 
@@ -188,20 +188,20 @@ object MultinomialNaiveBayes {
         //    (only element in documentCount data set)
         pc = documentsPerClass.map(new RichMapFunction[(String, Int), (String, Double)] {
 
-            var broadcastSet: util.List[Double] = null
+          var broadcastSet: util.List[Double] = null
 
-            override def open(config: Configuration): Unit = {
-              broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("documentCount")
-              if (broadcastSet.size() != 1) {
-                throw new RuntimeException("The document count data set used by p1 = 1 has the wrong size! " +
-                  "Please use p1 = 0 if the problem can not be solved.")
-              }
+          override def open(config: Configuration): Unit = {
+            broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("documentCount")
+            if (broadcastSet.size() != 1) {
+              throw new RuntimeException("The document count data set used by p1 = 1 has the wrong size! " +
+                "Please use p1 = 0 if the problem can not be solved.")
             }
+          }
 
-            override def map(value: (String, Int)): (String, Double) = {
-              (value._1, value._2 / broadcastSet.get(0))
-            }
-          }).withBroadcastSet(documentCount, "documentCount")
+          override def map(value: (String, Int)): (String, Double) = {
+            (value._1, value._2 / broadcastSet.get(0))
+          }
+        }).withBroadcastSet(documentCount, "documentCount")
       }
       //END POSSIBILITY 1
 
@@ -223,7 +223,7 @@ object MultinomialNaiveBayes {
       if (p3 == 0) {
 
         //Join the singleWordsInClass data set with the allWordsInClass data set to use the information for the
-          //calculation of p(w|c).
+        //calculation of p(w|c).
         val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
           (single, all) => (single._1, single._2, single._3, all._2)
         } // (class name -> word -> count of that word -> count of all words in that class)
@@ -270,15 +270,15 @@ object MultinomialNaiveBayes {
   }
 
   // Model (String, String, Double, Double, Double)
-  implicit def predictNNB = new PredictDataSetOperation[MultinomialNaiveBayes, (Int, String), (Int, String)]() {
+  implicit def predictNNB = new PredictDataSetOperation[MultinomialNaiveBayesJoinedModel, (Int, String), (Int, String)]() {
 
-    override def predictDataSet(instance: MultinomialNaiveBayes,
+    override def predictDataSet(instance: MultinomialNaiveBayesJoinedModel,
                                 predictParameters: ParameterMap,
                                 input: DataSet[(Int, String)]): DataSet[(Int, String)] = {
 
       if (instance.probabilityDataSet.isEmpty) {
         throw new RuntimeException("The NormalNaiveBayes has not been fitted to the " +
-            "data. This is necessary before a prediction on other data can be made.")
+          "data. This is necessary before a prediction on other data can be made.")
       }
 
       val probabilityDataSet = instance.probabilityDataSet.get

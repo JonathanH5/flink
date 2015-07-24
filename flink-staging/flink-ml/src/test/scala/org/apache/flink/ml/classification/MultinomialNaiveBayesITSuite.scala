@@ -32,7 +32,7 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
   it should "train a NaiveBayesClassifier" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes()
+    val nnb = MultinomialNaiveBayesJoinedModel()
 
     val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTrain.csv", "\n", "\t")
     nnb.fit(trainingDS);
@@ -48,7 +48,7 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
 
     val modelSet = env.readCsvFile[(String, String, Double, Double, Double)](saveLocationModel, "\n", "|")
 
-    val nnb = MultinomialNaiveBayes()
+    val nnb = MultinomialNaiveBayesJoinedModel()
     nnb.setModelDataSet(modelSet)
 
     val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTest.csv", "\n", "\t"))
