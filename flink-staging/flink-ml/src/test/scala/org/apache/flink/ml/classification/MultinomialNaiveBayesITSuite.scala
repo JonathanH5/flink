@@ -34,7 +34,8 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
     env.setParallelism(1)
     val nnb = MultinomialNaiveBayesJoinedModel()
 
-    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTrain.csv", "\n", "\t")
+    val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/" +
+      "OneDrive/datasets/bbc/runs/run1a/bbcTrain.csv", "\n", "\t")
     nnb.fit(trainingDS);
     nnb.saveModelDataSet(saveLocationModel)
 
@@ -46,14 +47,18 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
 
-    val modelSet = env.readCsvFile[(String, String, Double, Double, Double)](saveLocationModel, "\n", "|")
+    val modelSet = env
+      .readCsvFile[(String, String, Double, Double, Double)](saveLocationModel, "\n", "|")
 
     val nnb = MultinomialNaiveBayesJoinedModel()
     nnb.setModelDataSet(modelSet)
 
-    val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTest.csv", "\n", "\t"))
+    val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/" +
+      "OneDrive/datasets/bbc/runs/run1a/bbcTest.csv", "\n", "\t"))
 
-    solution.writeAsCsv("/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/bbcTestComputedCategories.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv("/Users/jonathanhasenburg/" +
+      "OneDrive/datasets/bbc/runs/run1a/bbcTestComputedCategories.csv",
+      "\n", "\t", WriteMode.OVERWRITE)
 
     env.execute()
 

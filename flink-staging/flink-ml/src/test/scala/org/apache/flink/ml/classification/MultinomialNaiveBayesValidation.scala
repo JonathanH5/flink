@@ -29,8 +29,8 @@ import org.scalatest.{FlatSpec, Matchers}
 import scala.util.Sorting
 
 /**
- * This test is used to compare whether the different versions of [[MultinomialNaiveBayes]] resulting
- * of the chooseable "possibilities" give the same result, what they should.
+ * This test is used to compare whether the different versions of [[MultinomialNaiveBayes]]
+ * resulting of the chooseable "possibilities" give the same result, what they should.
  */
 class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkTestBase {
 
@@ -48,7 +48,8 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"basicConfigModelWord.csv", outputFolder+"basicConfigModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "basicConfigModelWord.csv", outputFolder +
+      "basicConfigModelClass.csv")
 
     env.execute()
   }
@@ -59,18 +60,21 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     env.setParallelism(1)
 
     val nnb = MultinomialNaiveBayes()
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/basicConfigModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/basicConfigModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/basicConfigModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder +
+        "/basicConfigModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"basicConfigSolution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "basicConfigSolution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
     env.execute()
 
   }
 
   it should "validate, that basicConfig predicted everything but 357 and 358 correctly" in {
-    val basicA = scala.io.Source.fromFile(outputFolder+"basicConfigSolution.csv").getLines().toArray
+    val basicA = scala.io.Source.fromFile(outputFolder + "basicConfigSolution.csv").getLines()
+      .toArray
     for (line <- basicA) {
       val split = line.split("\t")
       if (split(0).toInt <= 10) {
@@ -94,7 +98,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"p1_0ModelWord.csv", outputFolder+"p1_0ModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "p1_0ModelWord.csv", outputFolder + "p1_0ModelClass.csv")
 
     env.execute()
   }
@@ -106,11 +110,12 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
 
     val nnb = MultinomialNaiveBayes().setP2(0)
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/p1_0ModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/p1_0ModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/p1_0ModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder + "/p1_0ModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"p1_0Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "p1_0Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
 
     env.execute()
@@ -125,7 +130,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"p1_1ModelWord.csv", outputFolder+"p1_1ModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "p1_1ModelWord.csv", outputFolder + "p1_1ModelClass.csv")
 
     env.execute()
   }
@@ -137,11 +142,12 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
 
     val nnb = MultinomialNaiveBayes().setP2(1)
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/p1_1ModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/p1_1ModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/p1_1ModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder + "/p1_1ModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"p1_1Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "p1_1Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
 
     env.execute()
@@ -151,39 +157,42 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
   it should "compare p1 = 0, p1 = 1 and the basic solutions" in {
     // Compare Model Word
-    val basicMW = scala.io.Source.fromFile(outputFolder+"basicConfigModelWord.csv").getLines().toArray
+    val basicMW = scala.io.Source.fromFile(outputFolder + "basicConfigModelWord.csv").getLines()
+      .toArray
     Sorting.quickSort(basicMW)
 
-    val p1_0MW = scala.io.Source.fromFile(outputFolder+"p1_0ModelWord.csv").getLines().toArray
+    val p1_0MW = scala.io.Source.fromFile(outputFolder + "p1_0ModelWord.csv").getLines().toArray
     Sorting.quickSort(p1_0MW)
 
-    val p1_1MW = scala.io.Source.fromFile(outputFolder+"p1_1ModelWord.csv").getLines().toArray
+    val p1_1MW = scala.io.Source.fromFile(outputFolder + "p1_1ModelWord.csv").getLines().toArray
     Sorting.quickSort(p1_1MW)
 
     assert(basicMW.deep == p1_0MW.deep)
     assert(p1_0MW.deep == p1_1MW.deep)
 
     // Comapre Model Class
-    val basicMC = scala.io.Source.fromFile(outputFolder+"basicConfigModelClass.csv").getLines().toArray
+    val basicMC = scala.io.Source.fromFile(outputFolder + "basicConfigModelClass.csv").getLines()
+      .toArray
     Sorting.quickSort(basicMC)
 
-    val p1_0MC = scala.io.Source.fromFile(outputFolder+"p1_0ModelClass.csv").getLines().toArray
+    val p1_0MC = scala.io.Source.fromFile(outputFolder + "p1_0ModelClass.csv").getLines().toArray
     Sorting.quickSort(p1_0MC)
 
-    val p1_1MC = scala.io.Source.fromFile(outputFolder+"p1_1ModelClass.csv").getLines().toArray
+    val p1_1MC = scala.io.Source.fromFile(outputFolder + "p1_1ModelClass.csv").getLines().toArray
     Sorting.quickSort(p1_1MC)
 
     assert(basicMC.deep == p1_0MC.deep)
     assert(p1_0MC.deep == p1_1MC.deep)
 
     // Compare Solutions
-    val basicS = scala.io.Source.fromFile(outputFolder+"basicConfigSolution.csv").getLines().toArray
+    val basicS = scala.io.Source.fromFile(outputFolder + "basicConfigSolution.csv").getLines()
+      .toArray
     Sorting.quickSort(basicS)
 
-    val p1_0S = scala.io.Source.fromFile(outputFolder+"p1_0Solution.csv").getLines().toArray
+    val p1_0S = scala.io.Source.fromFile(outputFolder + "p1_0Solution.csv").getLines().toArray
     Sorting.quickSort(p1_0S)
 
-    val p1_1S = scala.io.Source.fromFile(outputFolder+"p1_1Solution.csv").getLines().toArray
+    val p1_1S = scala.io.Source.fromFile(outputFolder + "p1_1Solution.csv").getLines().toArray
     Sorting.quickSort(p1_1S)
 
     assert(basicS.deep == p1_0S.deep)
@@ -198,7 +207,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"p2_0ModelWord.csv", outputFolder+"p2_0ModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "p2_0ModelWord.csv", outputFolder + "p2_0ModelClass.csv")
 
     env.execute()
   }
@@ -210,11 +219,12 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
 
     val nnb = MultinomialNaiveBayes().setP2(0)
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/p2_0ModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/p2_0ModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/p2_0ModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder + "/p2_0ModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"p2_0Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "p2_0Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
 
     env.execute()
@@ -229,7 +239,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"p2_1ModelWord.csv", outputFolder+"p2_1ModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "p2_1ModelWord.csv", outputFolder + "p2_1ModelClass.csv")
 
     env.execute()
   }
@@ -241,11 +251,12 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
 
     val nnb = MultinomialNaiveBayes().setP2(1)
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/p2_1ModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/p2_1ModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/p2_1ModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder + "/p2_1ModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"p2_1Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "p2_1Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
 
     env.execute()
@@ -254,39 +265,42 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
   it should "compare p2 = 0, p2 = 1 and the basic solutions" in {
     // Compare Model Word
-    val basicMW = scala.io.Source.fromFile(outputFolder+"basicConfigModelWord.csv").getLines().toArray
+    val basicMW = scala.io.Source.fromFile(outputFolder + "basicConfigModelWord.csv").getLines()
+      .toArray
     Sorting.quickSort(basicMW)
 
-    val p2_0MW = scala.io.Source.fromFile(outputFolder+"p2_0ModelWord.csv").getLines().toArray
+    val p2_0MW = scala.io.Source.fromFile(outputFolder + "p2_0ModelWord.csv").getLines().toArray
     Sorting.quickSort(p2_0MW)
 
-    val p2_1MW = scala.io.Source.fromFile(outputFolder+"p2_1ModelWord.csv").getLines().toArray
+    val p2_1MW = scala.io.Source.fromFile(outputFolder + "p2_1ModelWord.csv").getLines().toArray
     Sorting.quickSort(p2_1MW)
 
     assert(basicMW.deep == p2_0MW.deep)
     assert(p2_0MW.deep == p2_1MW.deep)
 
     // Comapre Model Class
-    val basicMC = scala.io.Source.fromFile(outputFolder+"basicConfigModelClass.csv").getLines().toArray
+    val basicMC = scala.io.Source.fromFile(outputFolder + "basicConfigModelClass.csv").getLines()
+      .toArray
     Sorting.quickSort(basicMC)
 
-    val p2_0MC = scala.io.Source.fromFile(outputFolder+"p2_0ModelClass.csv").getLines().toArray
+    val p2_0MC = scala.io.Source.fromFile(outputFolder + "p2_0ModelClass.csv").getLines().toArray
     Sorting.quickSort(p2_0MC)
 
-    val p2_1MC = scala.io.Source.fromFile(outputFolder+"p2_1ModelClass.csv").getLines().toArray
+    val p2_1MC = scala.io.Source.fromFile(outputFolder + "p2_1ModelClass.csv").getLines().toArray
     Sorting.quickSort(p2_1MC)
 
     assert(basicMC.deep == p2_0MC.deep)
     assert(p2_0MC.deep == p2_1MC.deep)
 
     // Compare Solutions
-    val basicS = scala.io.Source.fromFile(outputFolder+"basicConfigSolution.csv").getLines().toArray
+    val basicS = scala.io.Source.fromFile(outputFolder + "basicConfigSolution.csv").getLines()
+      .toArray
     Sorting.quickSort(basicS)
 
-    val p2_0S = scala.io.Source.fromFile(outputFolder+"p2_0Solution.csv").getLines().toArray
+    val p2_0S = scala.io.Source.fromFile(outputFolder + "p2_0Solution.csv").getLines().toArray
     Sorting.quickSort(p2_0S)
 
-    val p2_1S = scala.io.Source.fromFile(outputFolder+"p2_1Solution.csv").getLines().toArray
+    val p2_1S = scala.io.Source.fromFile(outputFolder + "p2_1Solution.csv").getLines().toArray
     Sorting.quickSort(p2_1S)
 
     assert(basicS.deep == p2_0S.deep)
@@ -301,7 +315,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"p3_0ModelWord.csv", outputFolder+"p3_0ModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "p3_0ModelWord.csv", outputFolder + "p3_0ModelClass.csv")
 
     env.execute()
   }
@@ -313,11 +327,12 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
 
     val nnb = MultinomialNaiveBayes().setP3(0)
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/p3_0ModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/p3_0ModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/p3_0ModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder + "/p3_0ModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"p3_0Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "p3_0Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
 
     env.execute()
@@ -332,7 +347,7 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
     val trainingDS = env.fromCollection(Classification.bbcTrainData)
     nnb.fit(trainingDS)
 
-    nnb.saveModelDataSet(outputFolder+"p3_1ModelWord.csv", outputFolder+"p3_1ModelClass.csv")
+    nnb.saveModelDataSet(outputFolder + "p3_1ModelWord.csv", outputFolder + "p3_1ModelClass.csv")
 
     env.execute()
   }
@@ -344,11 +359,12 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
 
     val nnb = MultinomialNaiveBayes().setP3(1)
-    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder+"/p3_1ModelWord.csv", "\n", "|"),
-      env.readCsvFile[(String, Double, Double)](outputFolder+"/p3_1ModelClass.csv", "\n", "|"))
+    nnb.setModelDataSet(env.readCsvFile[(String, String, Double)](outputFolder +
+      "/p3_1ModelWord.csv", "\n", "|"),
+      env.readCsvFile[(String, Double, Double)](outputFolder + "/p3_1ModelClass.csv", "\n", "|"))
 
     val solution = nnb.predict(env.fromCollection(Classification.bbcTestData))
-    solution.writeAsCsv(outputFolder+"p3_1Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
+    solution.writeAsCsv(outputFolder + "p3_1Solution.csv", "\n", "\t", WriteMode.OVERWRITE)
 
 
     env.execute()
@@ -357,39 +373,42 @@ class MultinomialNaiveBayesValidation extends FlatSpec with Matchers with FlinkT
 
   it should "compare p3 = 0, p3 = 1 and the basic solutions" in {
     // Compare Model Word
-    val basicMW = scala.io.Source.fromFile(outputFolder+"basicConfigModelWord.csv").getLines().toArray
+    val basicMW = scala.io.Source.fromFile(outputFolder + "basicConfigModelWord.csv").getLines()
+      .toArray
     Sorting.quickSort(basicMW)
 
-    val p3_0MW = scala.io.Source.fromFile(outputFolder+"p3_0ModelWord.csv").getLines().toArray
+    val p3_0MW = scala.io.Source.fromFile(outputFolder + "p3_0ModelWord.csv").getLines().toArray
     Sorting.quickSort(p3_0MW)
 
-    val p3_1MW = scala.io.Source.fromFile(outputFolder+"p3_1ModelWord.csv").getLines().toArray
+    val p3_1MW = scala.io.Source.fromFile(outputFolder + "p3_1ModelWord.csv").getLines().toArray
     Sorting.quickSort(p3_1MW)
 
     assert(basicMW.deep == p3_0MW.deep)
     assert(p3_0MW.deep == p3_1MW.deep)
 
     // Comapre Model Class
-    val basicMC = scala.io.Source.fromFile(outputFolder+"basicConfigModelClass.csv").getLines().toArray
+    val basicMC = scala.io.Source.fromFile(outputFolder + "basicConfigModelClass.csv").getLines()
+      .toArray
     Sorting.quickSort(basicMC)
 
-    val p3_0MC = scala.io.Source.fromFile(outputFolder+"p3_0ModelClass.csv").getLines().toArray
+    val p3_0MC = scala.io.Source.fromFile(outputFolder + "p3_0ModelClass.csv").getLines().toArray
     Sorting.quickSort(p3_0MC)
 
-    val p3_1MC = scala.io.Source.fromFile(outputFolder+"p3_1ModelClass.csv").getLines().toArray
+    val p3_1MC = scala.io.Source.fromFile(outputFolder + "p3_1ModelClass.csv").getLines().toArray
     Sorting.quickSort(p3_1MC)
 
     assert(basicMC.deep == p3_0MC.deep)
     assert(p3_0MC.deep == p3_1MC.deep)
 
     // Compare Solutions
-    val basicS = scala.io.Source.fromFile(outputFolder+"basicConfigSolution.csv").getLines().toArray
+    val basicS = scala.io.Source.fromFile(outputFolder + "basicConfigSolution.csv").getLines()
+      .toArray
     Sorting.quickSort(basicS)
 
-    val p3_0S = scala.io.Source.fromFile(outputFolder+"p3_0Solution.csv").getLines().toArray
+    val p3_0S = scala.io.Source.fromFile(outputFolder + "p3_0Solution.csv").getLines().toArray
     Sorting.quickSort(p3_0S)
 
-    val p3_1S = scala.io.Source.fromFile(outputFolder+"p3_1Solution.csv").getLines().toArray
+    val p3_1S = scala.io.Source.fromFile(outputFolder + "p3_1Solution.csv").getLines().toArray
     Sorting.quickSort(p3_1S)
 
     assert(basicS.deep == p3_0S.deep)
