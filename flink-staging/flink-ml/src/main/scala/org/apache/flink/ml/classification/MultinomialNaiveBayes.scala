@@ -1,3 +1,21 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.flink.ml.classification
 
 import java.util
@@ -5,7 +23,6 @@ import java.util
 import org.apache.flink.api.common.functions.{ReduceFunction, FlatMapFunction, RichMapFunction}
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
-import org.apache.flink.core.fs.FileSystem
 import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.ml.common.{ParameterMap, Parameter}
 import org.apache.flink.ml.pipeline.{PredictDataSetOperation, FitOperation, Predictor}
@@ -16,12 +33,13 @@ import scala.collection.mutable
 
 /**
  * While building the model different approaches need to be compared.
- * For that purpose the fitParameters are used. Every possibility that might enhance the implementation
- * can be chosen separately by using the following list of parameters:
+ * For that purpose the fitParameters are used. Every possibility that might enhance
+ * the implementation can be chosen separately by using the following list of parameters:
  *
  * Possibility 1: way of calculating document count
  *  P1 = 0 -> use .count() to get count of all documents
- *  P1 = 1 -> use a reducer and a mapper to create a broadcast data set containing the count of all documents
+ *  P1 = 1 -> use a reducer and a mapper to create a broadcast data set containing the count of
+ *    all documents
  *
  * Possibility 2: all words in class (order of operators)
  *    If p2 = 1 improves the speed, many other calculations must switch their operators, too.
@@ -39,12 +57,14 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
   import MultinomialNaiveBayes._
 
   //The model, that stores all needed information that are related to one specific word
-  var wordRelatedModelData: Option[DataSet[(String, String, Double)]] = None // (class name -> word -> P(w|c))
+  var wordRelatedModelData: Option[DataSet[(String, String, Double)]] =
+    None // (class name -> word -> P(w|c))
 
   //The model, that stores all needed information that are related to one specifc class+
-  var classRelatedModelData: Option[DataSet[(String, Double, Double)]] = None // (class name -> p(c) -> p(w|c) not in class)
+  var classRelatedModelData: Option[DataSet[(String, Double, Double)]] =
+    None // (class name -> p(c) -> p(w|c) not in class)
 
-  // ============================== Parameter configuration =========================================
+  // ============================== Parameter configuration ========================================
 
   def setP1(value: Int): MultinomialNaiveBayes = {
     parameters.add(P1, value)
@@ -61,11 +81,12 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
     this
   }
 
-  // =============================================== Methods =========================================
+  // =============================================== Methods =======================================
 
   /**
-   * Save already existing model data created by the NaiveBayes algorithm. Requires the designated locations
-   * The saved data is a representation of the [[wordRelatedModelData]] and [[classRelatedModelData]].
+   * Save already existing model data created by the NaiveBayes algorithm. Requires the designated
+   * locations. The saved data is a representation of the [[wordRelatedModelData]] and
+   * [[classRelatedModelData]].
    * @param wordRelated, the save location for the wordRelated data
    * @param classRelated, the save location for the classRelated data
    */
@@ -79,7 +100,8 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
    * @param wordRelated, the data set representing the wordRelated model
    * @param classRelated, the data set representing the classRelated model
    */
-  def setModelDataSet(wordRelated : DataSet[(String, String, Double)], classRelated: DataSet[(String, Double, Double)]) : Unit = {
+  def setModelDataSet(wordRelated : DataSet[(String, String, Double)],
+                      classRelated: DataSet[(String, Double, Double)]) : Unit = {
     this.wordRelatedModelData = Some(wordRelated)
     this.classRelatedModelData = Some(classRelated)
   }
@@ -102,7 +124,7 @@ object MultinomialNaiveBayes {
     override val defaultValue: Option[Int] = Some(0)
   }
 
-  // ======================================== Factory Methods =====================================
+  // ======================================== Factory Methods ======================================
 
   def apply(): MultinomialNaiveBayes = {
     new MultinomialNaiveBayes()
@@ -111,15 +133,18 @@ object MultinomialNaiveBayes {
   // ====================================== Operations =============================================
 
   /**
-   * Trains the models to fit the training data. The resulting [[MultinomialNaiveBayes.wordRelatedModelData]] and [[MultinomialNaiveBayes.classRelatedModelData]] are stored in
-   * the [[MultinomialNaiveBayes]] instance.
+   * Trains the models to fit the training data. The resulting
+   * [[MultinomialNaiveBayes.wordRelatedModelData]] and
+   * [[MultinomialNaiveBayes.classRelatedModelData]] are stored in the [[MultinomialNaiveBayes]]
+   * instance.
    */
 
 
   implicit val fitNNB = new FitOperation[MultinomialNaiveBayes, (String, String)] {
     /**
-     * The [[FitOperation]] used to create the model. Requires an instance of [[MultinomialNaiveBayes]], a [[ParameterMap]]
-     * and the input data set. This data set maps (string -> string) containing (label -> text, words separated by ",")
+     * The [[FitOperation]] used to create the model. Requires an instance of
+     * [[MultinomialNaiveBayes]], a [[ParameterMap]] and the input data set. This data set
+     * maps (string -> string) containing (label -> text, words separated by ",")
      * @param instance of [[MultinomialNaiveBayes]]
      * @param fitParameters, additional parameters
      * @param input, the to processed data set
@@ -139,22 +164,26 @@ object MultinomialNaiveBayes {
       //Count the amount of occurrences of each word for each class.
       // 1. FlatMap: split the document into its words and add a 1 to each tuple
       // 2. Group-Reduce: sum the 1s by class, word
-      val singleWordsInClass: DataSet[(String, String, Int)] = input.flatMap(new SingleWordSplitter())
+      val singleWordsInClass: DataSet[(String, String, Int)] = input
+        .flatMap(new SingleWordSplitter())
         .groupBy(0, 1).sum(2) // (class name -> word -> count of that word)
 
 
       //POSSIBILITY 2: all words in class (order of operators)
       val p2 = resultingParameters(P2)
 
-      var allWordsInClass: DataSet[(String, Int)] = null // (class name -> count of all words in that class)
+      var allWordsInClass: DataSet[(String, Int)] =
+        null // (class name -> count of all words in that class)
 
       if (p2 == 0) {
         //Count all the words for each class.
         // 1. Reduce: add the count for each word in a class together
         // 2. Map: remove the field that contains the word
         allWordsInClass = singleWordsInClass.groupBy(0).reduce {
-          (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
-        }.map(singleWords => (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
+          (singleWords1, singleWords2) =>
+            (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
+        }.map(singleWords =>
+          (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
       } else if (p2 == 1) {
         //Count all the words for each class.
         // 1. Map: remove the field that contains the word
@@ -195,8 +224,8 @@ object MultinomialNaiveBayes {
             override def open(config: Configuration): Unit = {
               broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("documentCount")
               if (broadcastSet.size() != 1) {
-                throw new RuntimeException("The document count data set used by p1 = 1 has the wrong size! " +
-                  "Please use p1 = 0 if the problem can not be solved.")
+                throw new RuntimeException("The document count data set used by p1 = 1 has the " +
+                  "wrong size! Please use p1 = 0 if the problem can not be solved.")
               }
             }
 
@@ -212,10 +241,11 @@ object MultinomialNaiveBayes {
       // (count of items in vocabulary list)
       val vocabularyCount: Double = vocabulary.count()
 
-      //calculate the P(w|c) value for words, that are not part of a class (needed because of smoothing)
+      //calculate the P(w|c) value for words, that are not part of a class, needed for smoothing
       // 1. Map: use P(w|c) formula with smoothing with n(c_j, w_t) = 0
       val pwcNotInClass: DataSet[(String, Double)] = allWordsInClass
-        .map(line => (line._1, 1 / (line._2 + vocabularyCount))) // (class name -> P(w|c) word not in class)
+        .map(line =>
+          (line._1, 1 / (line._2 + vocabularyCount))) // (class name -> P(w|c) word not in class)
 
       //POSSIBILITY 3: way of calculating pwc
       val p3 = resultingParameters(P3)
@@ -224,26 +254,29 @@ object MultinomialNaiveBayes {
 
       if (p3 == 0) {
 
-        //Join the singleWordsInClass data set with the allWordsInClass data set to use the information for the
-          //calculation of p(w|c).
+        //Join the singleWordsInClass data set with the allWordsInClass data set to use the
+          //information for the calculation of p(w|c).
         val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
           (single, all) => (single._1, single._2, single._3, all._2)
         } // (class name -> word -> count of that word -> count of all words in that class)
 
         //calculate the P(w|c) value for each word in each class
         // 1. Map: use normal P(w|c) formula
-        pwc = wordsInClass.map(line => (line._1, line._2, (line._3 + 1) / (line._4 + vocabularyCount)))
+        pwc = wordsInClass.map(line => (line._1, line._2, (line._3 + 1) /
+          (line._4 + vocabularyCount)))
       } else if (p3 == 1) {
 
         //calculate the P(w|c) value for each word in class
         //  1. Map: use normal P(w|c) formula
-        pwc = singleWordsInClass.map(new RichMapFunction[(String, String, Int), (String, String, Double)] {
+        pwc = singleWordsInClass.map(new RichMapFunction[(String, String, Int),
+          (String, String, Double)] {
 
           var broadcastMap: mutable.Map[String, Int] = mutable.Map[String, Int]()
 
 
           override def open(config: Configuration): Unit = {
-            val collection = getRuntimeContext.getBroadcastVariable[(String, Int)]("allWordsInClass").asScala
+            val collection = getRuntimeContext
+              .getBroadcastVariable[(String, Int)]("allWordsInClass").asScala
             for (record <- collection) {
               broadcastMap.put(record._1, record._2)
             }
@@ -272,7 +305,8 @@ object MultinomialNaiveBayes {
   }
 
   // Model (String, String, Double, Double, Double)
-  implicit def predictNNB = new PredictDataSetOperation[MultinomialNaiveBayes, (Int, String), (Int, String)]() {
+  implicit def predictNNB = new PredictDataSetOperation[MultinomialNaiveBayes,
+    (Int, String), (Int, String)]() {
 
     override def predictDataSet(instance: MultinomialNaiveBayes,
                                 predictParameters: ParameterMap,
@@ -294,39 +328,53 @@ object MultinomialNaiveBayes {
       //genreate word counts for each word with a key
       // 1. Map: put a 1 to each key
       // 2. Group-Reduce: group by id and word and sum the 1s
-      val wordsAndCount: DataSet[(Int, String, Int)] = words.map(line => (line._1, line._2, 1)).groupBy(0, 1).sum(2) // (id -> word -> word count in text)
+      val wordsAndCount: DataSet[(Int, String, Int)] = words.map(line => (line._1, line._2, 1))
+        .groupBy(0, 1).sum(2) // (id -> word -> word count in text)
 
       //calculate the count of all words for a text identified by its key
-      val wordsInText: DataSet[(Int, Int)] = wordsAndCount.map(line => (line._1, line._3)).groupBy(0).sum(1) //(id -> all words in text)
+      val wordsInText: DataSet[(Int, Int)] = wordsAndCount.map(line => (line._1, line._3))
+        .groupBy(0).sum(1) //(id -> all words in text)
 
       //generate a data set containing all words that are in model for each id, class pair
-      // 1. Join: wordRelatedModelData with wordsAndCount on words (id -> class -> word count -> log(P(w|c))
-      val foundWords: DataSet[(Int, String, Int, Double)] = wordRelatedModelData.join(wordsAndCount).where(1).equalTo(1) {
+      // 1. Join: wordRelatedModelData with wordsAndCount on
+      //  words (id -> class -> word count -> log(P(w|c))
+      val foundWords: DataSet[(Int, String, Int, Double)] = wordRelatedModelData
+        .join(wordsAndCount).where(1).equalTo(1) {
         (wordR, wordsAC) => (wordsAC._1, wordR._1, wordsAC._3, wordR._3)
       }
 
       //calculate sumpwc for found words
-      // 1. Map: Remove unneded information from foundWords and calculate the sumP(w|c) for each word (id -> class -> log(P(w|c) * word count)
+      // 1. Map: Remove unneded information from foundWords and calculate the sumP(w|c) for each
+      //  word (id -> class -> log(P(w|c) * word count)
       // 2. Group-Reduce: on id and class, sum all (log(P(w|c)) * word count) results
-      val sumPwcFoundWords: DataSet[(Int, String, Double)] = foundWords.map(line => (line._1, line._2, line._3 * line._4))
-        .groupBy(0, 1).reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
+      val sumPwcFoundWords: DataSet[(Int, String, Double)] = foundWords
+        .map(line => (line._1, line._2, line._3 * line._4))
+        .groupBy(0, 1).reduce((line1, line2) =>
+          (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
 
       //calculate sumwpc for words that are not in model in that class
       // 1. Map: Discard log(P(w|c) from foundWords
-      // 2. Group-Reduce: calculate sum count of found words for each document, class pair (id -> class -> sum(wordCount))
+      // 2. Group-Reduce: calculate sum count of found words for each document,
+      //  class pair (id -> class -> sum(wordCount))
       // 3. Join: with wordsInText on id, to get the count of all words per document
-      // 4. Map: calculate sumPWcNotFound (id -> class -> (all words in document - found word in document) * log(P(w|c) not in class (provided by broadcast)
-      val sumPwcNotFoundWords: DataSet[(Int, String, Double)] = foundWords.map(line => (line._1, line._2, line._3))
+      // 4. Map: calculate sumPWcNotFound (id -> class ->
+      //  (all words in document - found word in document) *
+      //  log(P(w|c) not in class (provided by broadcast)
+      val sumPwcNotFoundWords: DataSet[(Int, String, Double)] = foundWords
+        .map(line => (line._1, line._2, line._3))
         .groupBy(0, 1)
         .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
         .join(wordsInText).where(0).equalTo(0) {
         (foundW, wordsIT) => (foundW._1, foundW._2, foundW._3, wordsIT._2)
       }.map(new RichMapFunction[(Int, String, Int, Int), (Int, String, Double)] {
 
-        var broadcastMap: mutable.Map[String, Double] = mutable.Map[String, Double]() //class -> log(P(w|c) not found word in class)
+        var broadcastMap: mutable.Map[String, Double] = mutable
+          .Map[String, Double]() //class -> log(P(w|c) not found word in class)
 
         override def open(config: Configuration): Unit = {
-          val collection = getRuntimeContext.getBroadcastVariable[(String, Double, Double)]("classRelatedModelData").asScala
+          val collection = getRuntimeContext
+            .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+            .asScala
           for (record <- collection) {
             broadcastMap.put(record._1, record._3)
           }
@@ -340,18 +388,23 @@ object MultinomialNaiveBayes {
       //sum those pwc sums
       // 1. Join sumPwcFoundWords and sumPwcNotFoundWords
       // 2. Map: add sums from found words and sums from not found words
-      val sumPwc: DataSet[(Int, String, Double)] = sumPwcFoundWords.join(sumPwcNotFoundWords).where(0, 1).equalTo(0, 1) {
+      val sumPwc: DataSet[(Int, String, Double)] = sumPwcFoundWords
+        .join(sumPwcNotFoundWords).where(0, 1).equalTo(0, 1) {
         (found, notfound) => (found._1, found._2, found._3 + notfound._3)
       } //(id -> class name -> sum log(p(w|c)))
 
       //calcualte possibility for each class
       // 1. Map: add sumPwc values with log(P(c)) (provided by broadcast
-      val possibility: DataSet[(Int, String, Double)] = sumPwc.map(new RichMapFunction[(Int, String, Double),(Int, String, Double)] {
+      val possibility: DataSet[(Int, String, Double)] = sumPwc
+        .map(new RichMapFunction[(Int, String, Double),(Int, String, Double)] {
 
-        var broadcastMap: mutable.Map[String, Double] = mutable.Map[String, Double]() //class -> log(P(c))
+        var broadcastMap: mutable.Map[String, Double] =
+          mutable.Map[String, Double]() //class -> log(P(c))
 
         override def open(config: Configuration): Unit = {
-          val collection = getRuntimeContext.getBroadcastVariable[(String, Double, Double)]("classRelatedModelData").asScala
+          val collection = getRuntimeContext
+            .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+            .asScala
           for (record <- collection) {
             broadcastMap.put(record._1, record._2)
           }
@@ -364,7 +417,8 @@ object MultinomialNaiveBayes {
 
       //choose the highest probable class
       // 1. Reduce: keep only highest probability
-      possibility.groupBy(0).reduce(new CalculateReducer()).map(line => (line._1, line._2)) //(id -> class)
+      possibility.groupBy(0).reduce(new CalculateReducer())
+        .map(line => (line._1, line._2)) //(id -> class)
 
 
 
@@ -374,14 +428,15 @@ object MultinomialNaiveBayes {
 
 
   /*
-  * ******************************************************************************************************************
-  * *******************************************Function Classes*******************************************************
-  * ******************************************************************************************************************
+  * ************************************************************************************************
+  * *******************************************Function Classes*************************************
+  * ************************************************************************************************
    */
 
   /**
    * Transforms a (String, String) tuple into a (String, String, Int)) tuple.
-   * The second string from the input gets split into its words, for each word a tuple is collected with the Int 1.
+   * The second string from the input gets split into its words, for each word a tuple is collected
+   * with the Int 1.
    */
   class SingleWordSplitter() extends FlatMapFunction[(String, String), (String, String, Int)] {
     override def flatMap(value: (String, String), out: Collector[(String, String, Int)]): Unit = {
@@ -390,14 +445,16 @@ object MultinomialNaiveBayes {
       }
     }
 
-    // Can be implemented via: input.flatMap{ pair => pair._2.split(" ").map{ token => (pair._1, token ,1)} }
+    // Can be implemented via: input.flatMap{ pair => pair._2.split(" ")
+    // .map{ token => (pair._1, token ,1)} }
   }
 
   /**
    * Chooses for each label that class with the highest value
    */
   class CalculateReducer() extends ReduceFunction[(Int, String, Double)] {
-    override def reduce(value1: (Int, String, Double), value2: (Int, String, Double)): (Int, String, Double) = {
+    override def reduce(value1: (Int, String, Double),
+                        value2: (Int, String, Double)): (Int, String, Double) = {
       if (value1._3 > value2._3) {
         value1
       } else {
