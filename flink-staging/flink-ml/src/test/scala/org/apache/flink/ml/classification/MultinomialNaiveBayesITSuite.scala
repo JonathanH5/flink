@@ -25,19 +25,20 @@ import org.scalatest.{FlatSpec, Matchers}
 
 class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTestBase {
 
-  val saveLocationModel = "/Users/jonathanhasenburg/OneDrive/datasets/bbc/runs/run1a/model.csv"
+  val saveLocationModel = "/Users/jonathanhasenburg/Desktop/nbtemp/"
 
   behavior of "The MultinomialNaiveBayes implementation"
 
   it should "train a NaiveBayesClassifier" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayesJoinedModel()
+    val nnb = MultinomialNaiveBayes().setSR1(1)
 
     val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/" +
-      "OneDrive/datasets/bbc/runs/run1a/bbcTrain.csv", "\n", "\t")
+      "OneDrive/datasets/webkb/input/train.csv", "\n", "\t")
     nnb.fit(trainingDS);
-    nnb.saveModelDataSet(saveLocationModel)
+
+    nnb.saveModelDataSet(saveLocationModel + "wordRelated", saveLocationModel + "classRelated")
 
     env.execute()
   }
@@ -47,17 +48,16 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
 
-    val modelSet = env
-      .readCsvFile[(String, String, Double, Double, Double)](saveLocationModel, "\n", "|")
-
-    val nnb = MultinomialNaiveBayesJoinedModel()
-    nnb.setModelDataSet(modelSet)
+    val nnb = MultinomialNaiveBayes().setSR1(1)
+    nnb.setModelDataSet(env
+      .readCsvFile[(String, String, Double)](saveLocationModel + "wordRelated", "\n", "|"), env
+      .readCsvFile[(String, Double, Double)](saveLocationModel + "classRelated", "\n", "|"))
 
     val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/" +
-      "OneDrive/datasets/bbc/runs/run1a/bbcTest.csv", "\n", "\t"))
+      "OneDrive/datasets/webkb/input/test.csv", "\n", "\t"))
 
     solution.writeAsCsv("/Users/jonathanhasenburg/" +
-      "OneDrive/datasets/bbc/runs/run1a/bbcTestComputedCategories.csv",
+      "OneDrive/datasets/webkb/run/runtmp/solution.csv",
       "\n", "\t", WriteMode.OVERWRITE)
 
     env.execute()

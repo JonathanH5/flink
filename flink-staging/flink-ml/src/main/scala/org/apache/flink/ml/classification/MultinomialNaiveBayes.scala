@@ -50,6 +50,10 @@ import scala.collection.mutable
  *  P2 = 0 -> join singleWordsInClass and allWordsInClass to wordsInClass data set
  *  P3 = 1 -> work on singleWordsInClass data set and broadcast allWordsInClass data set
  *
+ * Schneider/Rennie 1: ignore/reduce word frequency information
+ *  SR1 = 0 -> word frequency information is not ignored
+ *  SR1 = 1 -> word frequency information is ignored (Schneiders approach)
+ *  SR1 = 2 -> word frequency information is ignored (Rennies approach)
  * TODO Enhance
  */
 class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
@@ -78,6 +82,11 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
   def setP3(value: Int): MultinomialNaiveBayes = {
     parameters.add(P3, value)
+    this
+  }
+
+  def setSR1(value: Int): MultinomialNaiveBayes = {
+    parameters.add(SR1, value)
     this
   }
 
@@ -124,6 +133,10 @@ object MultinomialNaiveBayes {
     override val defaultValue: Option[Int] = Some(0)
   }
 
+  case object SR1 extends Parameter[Int] {
+    override val defaultValue: Option[Int] = Some(0)
+  }
+
   // ======================================== Factory Methods ======================================
 
   def apply(): MultinomialNaiveBayes = {
@@ -164,35 +177,67 @@ object MultinomialNaiveBayes {
       //Count the amount of occurrences of each word for each class.
       // 1. FlatMap: split the document into its words and add a 1 to each tuple
       // 2. Group-Reduce: sum the 1s by class, word
-      val singleWordsInClass: DataSet[(String, String, Int)] = input
+      var singleWordsInClass: DataSet[(String, String, Int)] = input
         .flatMap(new SingleWordSplitter())
         .groupBy(0, 1).sum(2) // (class name -> word -> count of that word)
 
 
       //POSSIBILITY 2: all words in class (order of operators)
+      //Schneider/RENNIE 1: ignore/reduce word frequency information
+        //the allWordsInClass data set does only contain distinct
+        //words for schneiders approach: ndw(cj)
       val p2 = resultingParameters(P2)
+
+      val sr1 = resultingParameters(SR1)
 
       var allWordsInClass: DataSet[(String, Int)] =
         null // (class name -> count of all words in that class)
 
       if (p2 == 0) {
-        //Count all the words for each class.
-        // 1. Reduce: add the count for each word in a class together
-        // 2. Map: remove the field that contains the word
-        allWordsInClass = singleWordsInClass.groupBy(0).reduce {
-          (singleWords1, singleWords2) =>
-            (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
-        }.map(singleWords =>
-          (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
+        if (sr1 == 0) {
+          //Count all the words for each class.
+          // 1. Reduce: add the count for each word in a class together
+          // 2. Map: remove the field that contains the word
+          allWordsInClass = singleWordsInClass.groupBy(0).reduce {
+            (singleWords1, singleWords2) =>
+              (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
+          }.map(singleWords =>
+            (singleWords._1, singleWords._3)) // (class name -> count of all words in that class)
+        } else if (sr1 == 1) {
+          //Count all distinct words for each class.
+          // 1. Map: set the word count to 1
+          // 2. Reduce: add the count for each word in a class together
+          // 3. Map: remove the field that contains the word
+          allWordsInClass = singleWordsInClass
+            .map(singleWords => (singleWords._1, singleWords._2, 1))
+            .groupBy(0).reduce {
+            (singleWords1, singleWords2) =>
+              (singleWords1._1, singleWords1._2, singleWords1._3 + singleWords2._3)
+          }.map(singleWords =>
+            (singleWords._1, singleWords._3))//(class name -> count of distinct words in that class)
+        }
       } else if (p2 == 1) {
-        //Count all the words for each class.
-        // 1. Map: remove the field that contains the word
-        // 2. Reduce: add the count for each word in a class together
-        allWordsInClass = singleWordsInClass.map(singleWords => (singleWords._1, singleWords._3))
-          .groupBy(0).reduce {
+        if (sr1 == 0) {
+          //Count all the words for each class.
+          // 1. Map: remove the field that contains the word
+          // 2. Reduce: add the count for each word in a class together
+          allWordsInClass = singleWordsInClass.map(singleWords => (singleWords._1, singleWords._3))
+            .groupBy(0).reduce {
             (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2 + singleWords2._2)
           } // (class name -> count of all words in that class)
+        } else if (sr1 == 1) {
+          //Count all distinct words for each class.
+          // 1. Map: remove the field that contains the word, set the word count to 1
+          // 2. Reduce: add the count for each word in a class together
+          allWordsInClass = singleWordsInClass.map(singleWords => (singleWords._1, 1))
+            .groupBy(0).reduce {
+            (singleWords1, singleWords2) => (singleWords1._1, singleWords1._2 + singleWords2._2)
+          } // (class name -> count of distinct words in that class)
+        }
+
       }
+
+      //END SCHNEIDER/RENNIE 1
       //END POSSIBILITY 2
 
       //POSSIBILITY 1: way of calculating document count
@@ -247,7 +292,29 @@ object MultinomialNaiveBayes {
         .map(line =>
           (line._1, 1 / (line._2 + vocabularyCount))) // (class name -> P(w|c) word not in class)
 
+      //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
+        //The singleWordsInClass data set must be changed before, the calculation of pwc starts
+        //it needs this form: classname -> word -> number of documents containing wt in cj
+
+      if (sr1 == 1) {
+        //Calculate the required data set (see above)
+        // 1. FlatMap: class -> word -> count of that word
+        // 2. Map: Remove unesseccary count of word and replace with 1
+        // 3. Group-Reduce: sum all 1s where the first two fields equal
+        singleWordsInClass = input
+          .flatMap(new SingleWordSplitter())
+          .map(line => (line._1, line._2, 1))
+          .groupBy(0, 1)
+          .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
+      }
+
+      singleWordsInClass.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/singleWordsInClass",
+        "\n", "\t", WriteMode.OVERWRITE)
+
+      //END SCHNEIDER/RENNIE 1
+
       //POSSIBILITY 3: way of calculating pwc
+
       val p3 = resultingParameters(P3)
 
       var pwc: DataSet[(String, String, Double)] = null // (class name -> word -> P(w|c))
@@ -264,10 +331,11 @@ object MultinomialNaiveBayes {
         // 1. Map: use normal P(w|c) formula
         pwc = wordsInClass.map(line => (line._1, line._2, (line._3 + 1) /
           (line._4 + vocabularyCount)))
+
       } else if (p3 == 1) {
 
         //calculate the P(w|c) value for each word in class
-        //  1. Map: use normal P(w|c) formula
+        //  1. Map: use normal P(w|c) formula / use the
         pwc = singleWordsInClass.map(new RichMapFunction[(String, String, Int),
           (String, String, Double)] {
 
@@ -288,6 +356,8 @@ object MultinomialNaiveBayes {
         }).withBroadcastSet(allWordsInClass, "allWordsInClass")
 
       }
+
+      //END POSSIBILITY 3
 
       //stores all the word related information in one data set
       // 1. Map: Caluclate logarithms
@@ -343,14 +413,33 @@ object MultinomialNaiveBayes {
         (wordR, wordsAC) => (wordsAC._1, wordR._1, wordsAC._3, wordR._3)
       }
 
-      //calculate sumpwc for found words
-      // 1. Map: Remove unneded information from foundWords and calculate the sumP(w|c) for each
-      //  word (id -> class -> log(P(w|c) * word count)
-      // 2. Group-Reduce: on id and class, sum all (log(P(w|c)) * word count) results
-      val sumPwcFoundWords: DataSet[(Int, String, Double)] = foundWords
-        .map(line => (line._1, line._2, line._3 * line._4))
-        .groupBy(0, 1).reduce((line1, line2) =>
+      //TODO Schneider CHA 3 Word-Frequency: Map: without multiplication of word count
+      //TODO Schneider CHA 3/Renni CHA 4.1 Word-Frequency: Map: multiply with log(1 + wordcount)
+
+      //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
+
+      val sr1 = predictParameters(SR1)
+
+      var sumPwcFoundWords: DataSet[(Int, String, Double)] = null
+
+      if (sr1 == 0) {
+        //calculate sumpwc for found words
+        // 1. Map: Remove unneded information from foundWords and calculate the sumP(w|c) for each
+        //  word (id -> class -> word count * log(P(w|c))
+        // 2. Group-Reduce: on id and class, sum all (word count * log(P(w|c))) results
+        sumPwcFoundWords = foundWords
+          .map(line => (line._1, line._2, line._3 * line._4))
+          .groupBy(0, 1).reduce((line1, line2) =>
           (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
+      } else if (sr1 == 1) {
+        //same as sr1 == 0, but there is no multiplication with the word counts
+        sumPwcFoundWords = foundWords
+          .map(line => (line._1, line._2, line._4))
+          .groupBy(0, 1).reduce((line1, line2) =>
+          (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
+
+      }
+      //END SCHNEIDER/RENNIE 1
 
       //calculate sumwpc for words that are not in model in that class
       // 1. Map: Discard log(P(w|c) from foundWords
