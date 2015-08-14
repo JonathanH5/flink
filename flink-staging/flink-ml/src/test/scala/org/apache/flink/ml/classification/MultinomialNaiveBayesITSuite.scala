@@ -29,13 +29,25 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
 
   behavior of "The MultinomialNaiveBayes implementation"
 
+  it should "use the CRQSelection transformer" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
+    val crq = new CRQSelection()
+
+    val trainingDS = env.readCsvFile[(String, Int, String)]("/Users/jonathanhasenburg/" +
+      "OneDrive/datasets/webkb/input/trainFS.csv", "\n", "\t", lenient=true)
+    crq.fit(trainingDS);
+
+    env.execute()
+  }
+  /*
   it should "train a NaiveBayesClassifier" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setSR1(1)
+    val nnb = MultinomialNaiveBayes().setSR1(2)
 
     val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/" +
-      "OneDrive/datasets/webkb/input/train.csv", "\n", "\t")
+      "OneDrive/datasets/webkb/input/train.csv", "\n", "\t", lenient=true)
     nnb.fit(trainingDS);
 
     nnb.saveModelDataSet(saveLocationModel + "wordRelated", saveLocationModel + "classRelated")
@@ -48,20 +60,20 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
 
-    val nnb = MultinomialNaiveBayes().setSR1(1)
+    val nnb = MultinomialNaiveBayes().setSR1(2)
     nnb.setModelDataSet(env
       .readCsvFile[(String, String, Double)](saveLocationModel + "wordRelated", "\n", "|"), env
       .readCsvFile[(String, Double, Double)](saveLocationModel + "classRelated", "\n", "|"))
 
     val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/" +
-      "OneDrive/datasets/webkb/input/test.csv", "\n", "\t"))
+      "OneDrive/datasets/webkb/input/test.csv", "\n", "\t", lenient = true))
 
     solution.writeAsCsv("/Users/jonathanhasenburg/" +
-      "OneDrive/datasets/webkb/run/runtmp/solution.csv",
+      "OneDrive/datasets/webkb/run/runtmp/solution2.csv",
       "\n", "\t", WriteMode.OVERWRITE)
 
     env.execute()
 
   }
-
+*/
 }

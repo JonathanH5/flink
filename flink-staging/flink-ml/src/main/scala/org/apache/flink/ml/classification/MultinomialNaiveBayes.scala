@@ -53,8 +53,9 @@ import scala.collection.mutable
  * Schneider/Rennie 1: ignore/reduce word frequency information
  *  SR1 = 0 -> word frequency information is not ignored
  *  SR1 = 1 -> word frequency information is ignored (Schneiders approach)
- *  SR1 = 2 -> word frequency information is ignored (Rennies approach)
+ *  SR1 = 2 -> word frequency information is reduced (Rennies approach)
  * TODO Enhance
+ *
  */
 class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
@@ -181,11 +182,11 @@ object MultinomialNaiveBayes {
         .flatMap(new SingleWordSplitter())
         .groupBy(0, 1).sum(2) // (class name -> word -> count of that word)
 
-
       //POSSIBILITY 2: all words in class (order of operators)
-      //Schneider/RENNIE 1: ignore/reduce word frequency information
+      //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
         //the allWordsInClass data set does only contain distinct
-        //words for schneiders approach: ndw(cj)
+        //words for schneiders approach: ndw(cj), nothing changes for rennies approach
+
       val p2 = resultingParameters(P2)
 
       val sr1 = resultingParameters(SR1)
@@ -194,7 +195,7 @@ object MultinomialNaiveBayes {
         null // (class name -> count of all words in that class)
 
       if (p2 == 0) {
-        if (sr1 == 0) {
+        if (sr1 == 0 || sr1 == 2) {
           //Count all the words for each class.
           // 1. Reduce: add the count for each word in a class together
           // 2. Map: remove the field that contains the word
@@ -217,7 +218,7 @@ object MultinomialNaiveBayes {
             (singleWords._1, singleWords._3))//(class name -> count of distinct words in that class)
         }
       } else if (p2 == 1) {
-        if (sr1 == 0) {
+        if (sr1 == 0 || sr1 == 2) {
           //Count all the words for each class.
           // 1. Map: remove the field that contains the word
           // 2. Reduce: add the count for each word in a class together
@@ -293,8 +294,8 @@ object MultinomialNaiveBayes {
           (line._1, 1 / (line._2 + vocabularyCount))) // (class name -> P(w|c) word not in class)
 
       //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
-        //The singleWordsInClass data set must be changed before, the calculation of pwc starts
-        //it needs this form: classname -> word -> number of documents containing wt in cj
+        //The singleWordsInClass data set must be changed before, the calculation of pwc starts for
+        //schneider, it needs this form classname -> word -> number of documents containing wt in cj
 
       if (sr1 == 1) {
         //Calculate the required data set (see above)
@@ -308,12 +309,11 @@ object MultinomialNaiveBayes {
           .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
       }
 
-      singleWordsInClass.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/singleWordsInClass",
-        "\n", "\t", WriteMode.OVERWRITE)
-
       //END SCHNEIDER/RENNIE 1
 
       //POSSIBILITY 3: way of calculating pwc
+      //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
+        //calculate pwc with the rennie formula
 
       val p3 = resultingParameters(P3)
 
@@ -321,16 +321,23 @@ object MultinomialNaiveBayes {
 
       if (p3 == 0) {
 
-        //Join the singleWordsInClass data set with the allWordsInClass data set to use the
+          //Join the singleWordsInClass data set with the allWordsInClass data set to use the
           //information for the calculation of p(w|c).
-        val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
-          (single, all) => (single._1, single._2, single._3, all._2)
-        } // (class name -> word -> count of that word -> count of all words in that class)
+          val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
+            (single, all) => (single._1, single._2, single._3, all._2)
+          } // (class name -> word -> count of that word -> count of all words in that class)
 
-        //calculate the P(w|c) value for each word in each class
-        // 1. Map: use normal P(w|c) formula
-        pwc = wordsInClass.map(line => (line._1, line._2, (line._3 + 1) /
-          (line._4 + vocabularyCount)))
+        if (sr1 == 0 || sr1 == 1) {
+          //calculate the P(w|c) value for each word in each class
+          // 1. Map: use normal P(w|c) formula
+          pwc = wordsInClass.map(line => (line._1, line._2, (line._3 + 1) /
+            (line._4 + vocabularyCount)))
+        } else if (sr1 == 2) {
+          //calculate the P(w|c) value for each word in each class
+          // 1. Map: use rennie P(w|c) formula
+          pwc = wordsInClass.map(line => (line._1, line._2, (Math.log(line._3 + 1) + 1) /
+            (Math.log(line._4) + vocabularyCount)))
+        }
 
       } else if (p3 == 1) {
 
@@ -351,12 +358,19 @@ object MultinomialNaiveBayes {
           }
 
           override def map(value: (String, String, Int)): (String, String, Double) = {
-            (value._1, value._2, (value._3 + 1) / (broadcastMap(value._1) + vocabularyCount))
+            var r: (String, String, Double) = null
+            if (sr1 == 0 | sr1 == 1) {
+              r = (value._1, value._2, (value._3 + 1) / (broadcastMap(value._1) + vocabularyCount))
+            } else if (sr1 == 2) {
+              r = (value._1, value._2, (Math.log(value._3 + 1) + 1) / (Math.log(broadcastMap(value._1)) + vocabularyCount))
+            }
+            r
           }
         }).withBroadcastSet(allWordsInClass, "allWordsInClass")
 
       }
 
+      //END SCHNEIDER/RENNIE 1
       //END POSSIBILITY 3
 
       //stores all the word related information in one data set
@@ -413,9 +427,6 @@ object MultinomialNaiveBayes {
         (wordR, wordsAC) => (wordsAC._1, wordR._1, wordsAC._3, wordR._3)
       }
 
-      //TODO Schneider CHA 3 Word-Frequency: Map: without multiplication of word count
-      //TODO Schneider CHA 3/Renni CHA 4.1 Word-Frequency: Map: multiply with log(1 + wordcount)
-
       //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
 
       val sr1 = predictParameters(SR1)
@@ -437,7 +448,12 @@ object MultinomialNaiveBayes {
           .map(line => (line._1, line._2, line._4))
           .groupBy(0, 1).reduce((line1, line2) =>
           (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
-
+      } else if (sr1 == 2) {
+        //same es sr1 == 0, but multiplication with log(wordcount + 1)
+        sumPwcFoundWords = foundWords
+          .map(line => (line._1, line._2, Math.log(line._3 + 1) * line._4))
+          .groupBy(0, 1).reduce((line1, line2) =>
+          (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
       }
       //END SCHNEIDER/RENNIE 1
 
@@ -513,7 +529,6 @@ object MultinomialNaiveBayes {
 
     }
   }
-
 
 
   /*
