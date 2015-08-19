@@ -362,7 +362,8 @@ object MultinomialNaiveBayes {
             if (sr1 == 0 | sr1 == 1) {
               r = (value._1, value._2, (value._3 + 1) / (broadcastMap(value._1) + vocabularyCount))
             } else if (sr1 == 2) {
-              r = (value._1, value._2, (Math.log(value._3 + 1) + 1) / (Math.log(broadcastMap(value._1)) + vocabularyCount))
+              r = (value._1, value._2, (Math.log(value._3 + 1) + 1) /
+                (Math.log(broadcastMap(value._1)) + vocabularyCount))
             }
             r
           }
@@ -404,6 +405,8 @@ object MultinomialNaiveBayes {
       val wordRelatedModelData = instance.wordRelatedModelData.get
       val classRelatedModelData = instance.classRelatedModelData.get
 
+      val resultingParameters = instance.parameters ++ predictParameters
+
       //split the texts from the input data set into its words
       val words: DataSet[(Int, String)] = input.flatMap {
         pair => pair._2.split(" ").map { word => (pair._1, word)}
@@ -429,7 +432,7 @@ object MultinomialNaiveBayes {
 
       //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
 
-      val sr1 = predictParameters(SR1)
+      val sr1 = resultingParameters(SR1)
 
       var sumPwcFoundWords: DataSet[(Int, String, Double)] = null
 
