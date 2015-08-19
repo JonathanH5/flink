@@ -312,8 +312,6 @@ object MultinomialNaiveBayes {
       //END SCHNEIDER/RENNIE 1
 
       //POSSIBILITY 3: way of calculating pwc
-      //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
-        //calculate pwc with the rennie formula
 
       val p3 = resultingParameters(P3)
 
@@ -327,17 +325,10 @@ object MultinomialNaiveBayes {
             (single, all) => (single._1, single._2, single._3, all._2)
           } // (class name -> word -> count of that word -> count of all words in that class)
 
-        if (sr1 == 0 || sr1 == 1) {
           //calculate the P(w|c) value for each word in each class
           // 1. Map: use normal P(w|c) formula
           pwc = wordsInClass.map(line => (line._1, line._2, (line._3 + 1) /
             (line._4 + vocabularyCount)))
-        } else if (sr1 == 2) {
-          //calculate the P(w|c) value for each word in each class
-          // 1. Map: use rennie P(w|c) formula
-          pwc = wordsInClass.map(line => (line._1, line._2, (Math.log(line._3 + 1) + 1) /
-            (Math.log(line._4) + vocabularyCount)))
-        }
 
       } else if (p3 == 1) {
 
@@ -358,20 +349,12 @@ object MultinomialNaiveBayes {
           }
 
           override def map(value: (String, String, Int)): (String, String, Double) = {
-            var r: (String, String, Double) = null
-            if (sr1 == 0 | sr1 == 1) {
-              r = (value._1, value._2, (value._3 + 1) / (broadcastMap(value._1) + vocabularyCount))
-            } else if (sr1 == 2) {
-              r = (value._1, value._2, (Math.log(value._3 + 1) + 1) /
-                (Math.log(broadcastMap(value._1)) + vocabularyCount))
-            }
-            r
+            (value._1, value._2, (value._3 + 1) / (broadcastMap(value._1) + vocabularyCount))
           }
         }).withBroadcastSet(allWordsInClass, "allWordsInClass")
 
       }
 
-      //END SCHNEIDER/RENNIE 1
       //END POSSIBILITY 3
 
       //stores all the word related information in one data set
