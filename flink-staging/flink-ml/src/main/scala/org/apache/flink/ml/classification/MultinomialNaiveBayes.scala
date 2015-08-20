@@ -54,7 +54,10 @@ import scala.collection.mutable
  *  SR1 = 0 -> word frequency information is not ignored
  *  SR1 = 1 -> word frequency information is ignored (Schneiders approach)
  *  SR1 = 2 -> word frequency information is reduced (Rennies approach)
- * TODO Enhance
+ *
+ * Schneider1: ignore P(c_j) in cMAP formula
+ *  S1 = 0 -> normal cMAP formula
+ *  S2 = 1 -> cMAP without P(c_j)
  *
  */
 class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
@@ -88,6 +91,11 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
   def setSR1(value: Int): MultinomialNaiveBayes = {
     parameters.add(SR1, value)
+    this
+  }
+
+  def setS1(value: Int): MultinomialNaiveBayes = {
+    parameters.add(S1, value)
     this
   }
 
@@ -135,6 +143,10 @@ object MultinomialNaiveBayes {
   }
 
   case object SR1 extends Parameter[Int] {
+    override val defaultValue: Option[Int] = Some(0)
+  }
+
+  case object S1 extends Parameter[Int] {
     override val defaultValue: Option[Int] = Some(0)
   }
 
@@ -484,28 +496,34 @@ object MultinomialNaiveBayes {
         (found, notfound) => (found._1, found._2, found._3 + notfound._3)
       } //(id -> class name -> sum log(p(w|c)))
 
-      //calcualte possibility for each class
-      // 1. Map: add sumPwc values with log(P(c)) (provided by broadcast
-      val possibility: DataSet[(Int, String, Double)] = sumPwc
-        .map(new RichMapFunction[(Int, String, Double),(Int, String, Double)] {
+      //SCHNEIDER 1: ignore P(c_j) in cMAP formula
+      val s1 = resultingParameters(S1)
+      var possibility: DataSet[(Int, String, Double)] = null
+      if (s1 == 0) {
+        //calcualte possibility for each class
+        // 1. Map: add sumPwc values with log(P(c)) (provided by broadcast
+        possibility = sumPwc
+          .map(new RichMapFunction[(Int, String, Double), (Int, String, Double)] {
 
-        var broadcastMap: mutable.Map[String, Double] =
-          mutable.Map[String, Double]() //class -> log(P(c))
+          var broadcastMap: mutable.Map[String, Double] =
+            mutable.Map[String, Double]() //class -> log(P(c))
 
-        override def open(config: Configuration): Unit = {
-          val collection = getRuntimeContext
-            .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
-            .asScala
-          for (record <- collection) {
-            broadcastMap.put(record._1, record._2)
+          override def open(config: Configuration): Unit = {
+            val collection = getRuntimeContext
+              .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+              .asScala
+            for (record <- collection) {
+              broadcastMap.put(record._1, record._2)
+            }
           }
-        }
 
-        override def map(value: (Int, String, Double)): (Int, String, Double) = {
-          (value._1, value._2, value._3 + broadcastMap(value._2))
-        }
-      }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
-
+          override def map(value: (Int, String, Double)): (Int, String, Double) = {
+            (value._1, value._2, value._3 + broadcastMap(value._2))
+          }
+        }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
+      } else if (s1 == 1) {
+        possibility = sumPwc
+      }
       //choose the highest probable class
       // 1. Reduce: keep only highest probability
       possibility.groupBy(0).reduce(new CalculateReducer())
