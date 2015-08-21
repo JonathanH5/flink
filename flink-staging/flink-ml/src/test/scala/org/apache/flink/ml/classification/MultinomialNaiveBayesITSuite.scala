@@ -45,13 +45,14 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
   it should "train a NaiveBayesClassifier" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
-    val nnb = MultinomialNaiveBayes().setSR1(1)
+    val nnb = MultinomialNaiveBayes().setSR1(2).setR1(1)
 
     val trainingDS = env.readCsvFile[(String, String)]("/Users/jonathanhasenburg/" +
       "OneDrive/datasets/webkb/input/train.csv", "\n", "\t", lenient=true)
     nnb.fit(trainingDS);
 
     nnb.saveModelDataSet(saveLocationModel + "wordRelated", saveLocationModel + "classRelated")
+    nnb.saveImprovementDataSet(saveLocationModel + "improvementData")
 
     env.execute()
   }
@@ -61,10 +62,13 @@ class MultinomialNaiveBayesITSuite extends FlatSpec with Matchers with FlinkTest
     val env = ExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
 
-    val nnb = MultinomialNaiveBayes().setSR1(1)
+    val nnb = MultinomialNaiveBayes().setSR1(2).setR1(1)
     nnb.setModelDataSet(env
       .readCsvFile[(String, String, Double)](saveLocationModel + "wordRelated", "\n", "|"), env
       .readCsvFile[(String, Double, Double)](saveLocationModel + "classRelated", "\n", "|"))
+
+    nnb.setImprovementDataSet(
+      env.readCsvFile[(String, Double)](saveLocationModel + "improvementData", "\n", "|"))
 
     val solution = nnb.predict(env.readCsvFile[(Int, String)]("/Users/jonathanhasenburg/" +
       "OneDrive/datasets/webkb/input/test.csv", "\n", "\t", lenient = true))
