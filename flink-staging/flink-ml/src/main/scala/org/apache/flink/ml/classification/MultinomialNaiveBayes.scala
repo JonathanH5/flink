@@ -30,6 +30,7 @@ import org.apache.flink.util.Collector
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 
 /**
  * While building the model different approaches need to be compared.
@@ -59,6 +60,11 @@ import scala.collection.mutable
  *  S1 = 0 -> normal cMAP formula
  *  S2 = 1 -> cMAP without P(c_j)
  *
+ * Rennie1: transform document frequency
+ *  R1 = 0 -> normal formula
+ *  R1 = 1 -> apply inverse document frequecy
+ * Note: if R1 = 1 and SR1 = 2, both approaches get applied.
+ *
  */
 class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
@@ -66,11 +72,15 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
 
   //The model, that stores all needed information that are related to one specific word
   var wordRelatedModelData: Option[DataSet[(String, String, Double)]] =
-    None // (class name -> word -> P(w|c))
+    None // (class name -> word -> log P(w|c))
 
   //The model, that stores all needed information that are related to one specifc class+
   var classRelatedModelData: Option[DataSet[(String, Double, Double)]] =
-    None // (class name -> p(c) -> p(w|c) not in class)
+    None // (class name -> p(c) -> log p(w|c) not in class)
+
+  //A data set that stores additional needed information for some of the improvements
+  var improvementData: Option[DataSet[(String, Double)]] =
+    None // (word -> log number of documents in all classes / word frequency in all classes
 
   // ============================== Parameter configuration ========================================
 
@@ -99,6 +109,11 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
     this
   }
 
+  def setR1(value: Int): MultinomialNaiveBayes = {
+    parameters.add(R1, value)
+    this
+  }
+
   // =============================================== Methods =======================================
 
   /**
@@ -114,6 +129,15 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
   }
 
   /**
+   * Save the improvment data set. Requires the designated save location. The saved data is a
+   * representation of the [[improvementData]] data set.
+   * @param path, the save location for the improvment data
+   */
+  def saveImprovementDataSet(path: String) : Unit = {
+    improvementData.get.writeAsCsv(path, "\n", "|", WriteMode.OVERWRITE)
+  }
+
+  /**
    * Sets the [[wordRelatedModelData]] and the [[classRelatedModelData]] to the given data sets.
    * @param wordRelated, the data set representing the wordRelated model
    * @param classRelated, the data set representing the classRelated model
@@ -122,6 +146,10 @@ class MultinomialNaiveBayes extends Predictor[MultinomialNaiveBayes] {
                       classRelated: DataSet[(String, Double, Double)]) : Unit = {
     this.wordRelatedModelData = Some(wordRelated)
     this.classRelatedModelData = Some(classRelated)
+  }
+
+  def setImprovementDataSet(impSet : DataSet[(String, Double)]) : Unit = {
+    this.improvementData = Some(impSet)
   }
 
 }
@@ -147,6 +175,10 @@ object MultinomialNaiveBayes {
   }
 
   case object S1 extends Parameter[Int] {
+    override val defaultValue: Option[Int] = Some(0)
+  }
+
+  case object R1 extends Parameter[Int] {
     override val defaultValue: Option[Int] = Some(0)
   }
 
@@ -311,14 +343,16 @@ object MultinomialNaiveBayes {
 
       if (sr1 == 1) {
         //Calculate the required data set (see above)
-        // 1. FlatMap: class -> word -> count of that word
-        // 2. Map: Remove unesseccary count of word and replace with 1
-        // 3. Group-Reduce: sum all 1s where the first two fields equal
+        // 1. FlatMap: class -> word -> 1 (one tuple for each document in which this word occurs)
+        // 2. Group-Reduce: sum all 1s where the first two fields equal
+        // 3. Map: Remove unesseccary count of word and replace with 1
         singleWordsInClass = input
-          .flatMap(new SingleWordSplitter())
-          .map(line => (line._1, line._2, 1))
+          .flatMap(new SingleDistinctWordSplitter())
           .groupBy(0, 1)
           .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
+
+        singleWordsInClass.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/singleWordsInClass",
+          "\n", "|", WriteMode.OVERWRITE)
       }
 
       //END SCHNEIDER/RENNIE 1
@@ -381,6 +415,56 @@ object MultinomialNaiveBayes {
 
       instance.wordRelatedModelData = Some(wordRelatedModelData)
       instance.classRelatedModelData = Some(classRelatedModelData)
+
+      //RENNIE 1: transform document frequency
+        //for this, the improvementData set must be set
+        //calculate (word -> log number of documents in all classes / word frequency in all classes)
+
+      val r1 = resultingParameters(R1)
+
+      if (r1 == 1) {
+        val totalDocumentCount: DataSet[(Double)] = documentsPerClass
+          .reduce((line1, line2) => (line1._1, line1._2 + line2._2))
+          .map(line => line._2) // (count of all documents)
+
+        totalDocumentCount.writeAsText("/Users/jonathanhasenburg/Desktop/nbtemp/totalDocumentCount",
+          WriteMode.OVERWRITE)
+
+        //number of occurences over all documents of all classes
+        val wordCountTotal = input
+          .flatMap(new SingleDistinctWordSplitter())
+          .map(line => (line._2, 1))
+          .groupBy(0)
+          .reduce((line1, line2) => (line1._1, line1._2 + line2._2))
+           // (word -> count of documents with that word)
+
+        wordCountTotal.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/wordCountTotal",
+          "\n", "|", WriteMode.OVERWRITE)
+
+        val improvementData = wordCountTotal.map(new RichMapFunction[(String, Int),
+          (String, Double)] {
+
+          var broadcastSet: util.List[Double] = null
+
+          override def open(config: Configuration): Unit = {
+            broadcastSet = getRuntimeContext.getBroadcastVariable[Double]("totalDocumentCount")
+            if (broadcastSet.size() != 1) {
+              throw new RuntimeException("The total document count data set used by 11 = 1 has " +
+                "the wrong size! Please use r1 = 0 if the problem can not be solved.")
+            }
+          }
+
+          override def map(value: (String, Int)): (String, Double) = {
+            (value._1, Math.log(broadcastSet.get(0) / value._2))
+          }
+        }).withBroadcastSet(totalDocumentCount, "totalDocumentCount")
+
+        improvementData.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/improvementData",
+          "\n", "|", WriteMode.OVERWRITE)
+
+        instance.improvementData = Some(improvementData)
+      }
+
     }
   }
 
@@ -419,44 +503,80 @@ object MultinomialNaiveBayes {
 
       //generate a data set containing all words that are in model for each id, class pair
       // 1. Join: wordRelatedModelData with wordsAndCount on
-      //  words (id -> class -> word count -> log(P(w|c))
-      val foundWords: DataSet[(Int, String, Int, Double)] = wordRelatedModelData
+      //  words (id -> class -> word ->  word count -> log(P(w|c))
+      val foundWords: DataSet[(Int, String, String, Int, Double)] = wordRelatedModelData
         .join(wordsAndCount).where(1).equalTo(1) {
-        (wordR, wordsAC) => (wordsAC._1, wordR._1, wordsAC._3, wordR._3)
+        (wordR, wordsAC) => (wordsAC._1, wordR._1, wordsAC._2, wordsAC._3, wordR._3)
       }
 
       //SCHNEIDER/RENNIE 1: ignore/reduce word frequency information
+      //RENNIE 1: transform document frequency
 
       val sr1 = resultingParameters(SR1)
+      val r1 = resultingParameters(R1)
+      var improvementData: DataSet[(String, Double)] = null
+
+      if (r1 == 1) {
+        //The improvementData data set is needed
+        if (instance.improvementData.isEmpty) {
+          throw new RuntimeException("R1 = 1, for that additional data is needed, but it was not" +
+            "found. Make sure to set R1 = 1 when fitting the training data.")
+        }
+        improvementData = instance.improvementData.get
+      }
+
+      if (sr1 == 1 && r1 == 1) {
+        throw new RuntimeException("Parameter sr1 and r1 are both set to 1, which is not allowed.")
+      }
 
       var sumPwcFoundWords: DataSet[(Int, String, Double)] = null
 
-      if (sr1 == 0) {
+      if (sr1 == 0 && r1 == 0) {
         //calculate sumpwc for found words
         // 1. Map: Remove unneded information from foundWords and calculate the sumP(w|c) for each
         //  word (id -> class -> word count * log(P(w|c))
         // 2. Group-Reduce: on id and class, sum all (word count * log(P(w|c))) results
         sumPwcFoundWords = foundWords
-          .map(line => (line._1, line._2, line._3 * line._4))
+          .map(line => (line._1, line._2, line._4 * line._5))
           .groupBy(0, 1).reduce((line1, line2) =>
           (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
-      } else if (sr1 == 1) {
+      } else if (sr1 == 1 && r1 == 0) {
         //same as sr1 == 0, but there is no multiplication with the word counts
         sumPwcFoundWords = foundWords
-          .map(line => (line._1, line._2, line._4))
+          .map(line => (line._1, line._2, line._5))
           .groupBy(0, 1).reduce((line1, line2) =>
           (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
-      } else if (sr1 == 2) {
+      } else if (sr1 == 2 && r1 == 0) {
         //same es sr1 == 0, but multiplication with log(wordcount + 1)
         sumPwcFoundWords = foundWords
-          .map(line => (line._1, line._2, Math.log(line._3 + 1) * line._4))
+          .map(line => (line._1, line._2, Math.log(line._4 + 1) * line._5))
           .groupBy(0, 1).reduce((line1, line2) =>
           (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c))
+      } else if (sr1 == 0 && r1 == 1) {
+        //same as r1 = 0, but the word frequency is multiplied with with log (n_d(c) / n_d(w_t))
+        //for that a join with the improvementData data set must be performed first to get the
+        //needed additional information.
+        // Join: (id -> class ->  word count * log P(w|c) * log (number of documents in class /
+                                                            // word frequency in all classes)
+        sumPwcFoundWords = foundWords
+          .join(improvementData).where(2).equalTo(0) {
+          (found, imp) => (found._1, found._2, found._4 * found._5 * imp._2)
+          }.groupBy(0, 1).reduce((line1, line2) =>
+          (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c)) */
+      } else if (sr1 == 2 && r1 == 1) {
+        //combination of r1 = 1 and sr1 =2
+        sumPwcFoundWords = foundWords
+          .join(improvementData).where(2).equalTo(0) {
+          (found, imp) => (found._1, found._2, Math.log(found._4 + 1) * found._5 * imp._2)
+        }.groupBy(0, 1).reduce((line1, line2) =>
+          (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c)) */
       }
+
+      //END RENNIE 1
       //END SCHNEIDER/RENNIE 1
 
       //calculate sumwpc for words that are not in model in that class
-      // 1. Map: Discard log(P(w|c) from foundWords
+      // 1. Map: Discard word and log(P(w|c) from foundWords
       // 2. Group-Reduce: calculate sum count of found words for each document,
       //  class pair (id -> class -> sum(wordCount))
       // 3. Join: with wordsInText on id, to get the count of all words per document
@@ -464,7 +584,7 @@ object MultinomialNaiveBayes {
       //  (all words in document - found word in document) *
       //  log(P(w|c) not in class (provided by broadcast)
       val sumPwcNotFoundWords: DataSet[(Int, String, Double)] = foundWords
-        .map(line => (line._1, line._2, line._3))
+        .map(line => (line._1, line._2, line._4))
         .groupBy(0, 1)
         .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
         .join(wordsInText).where(0).equalTo(0) {
@@ -498,11 +618,11 @@ object MultinomialNaiveBayes {
 
       //SCHNEIDER 1: ignore P(c_j) in cMAP formula
       val s1 = resultingParameters(S1)
-      var possibility: DataSet[(Int, String, Double)] = null
+      var posterior: DataSet[(Int, String, Double)] = null
       if (s1 == 0) {
-        //calcualte possibility for each class
-        // 1. Map: add sumPwc values with log(P(c)) (provided by broadcast
-        possibility = sumPwc
+        //calculate posterior values for each class
+        // 1. Map: add sumPwc values with log(P(c)) (provided by broadcast)
+        posterior = sumPwc
           .map(new RichMapFunction[(Int, String, Double), (Int, String, Double)] {
 
           var broadcastMap: mutable.Map[String, Double] =
@@ -522,11 +642,11 @@ object MultinomialNaiveBayes {
           }
         }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
       } else if (s1 == 1) {
-        possibility = sumPwc
+        posterior = sumPwc
       }
       //choose the highest probable class
       // 1. Reduce: keep only highest probability
-      possibility.groupBy(0).reduce(new CalculateReducer())
+      posterior.groupBy(0).reduce(new CalculateReducer())
         .map(line => (line._1, line._2)) //(id -> class)
 
 
@@ -550,6 +670,28 @@ object MultinomialNaiveBayes {
     override def flatMap(value: (String, String), out: Collector[(String, String, Int)]): Unit = {
       for (token: String <- value._2.split(" ")) {
         out.collect((value._1, token, 1))
+      }
+    }
+
+    // Can be implemented via: input.flatMap{ pair => pair._2.split(" ")
+    // .map{ token => (pair._1, token ,1)} }
+  }
+
+  /**
+   * Transforms a (String, String) tuple into a (String, String, Int)) tuple.
+   * The second string from the input gets split into its words, for each distinct word a tuple
+   * is collected with the Int 1.
+   */
+  class SingleDistinctWordSplitter() extends FlatMapFunction[(String, String),
+    (String, String, Int)] {
+    override def flatMap(value: (String, String), out: Collector[(String, String, Int)]): Unit = {
+      var x: ListBuffer[String] = ListBuffer()
+      for (token: String <- value._2.split(" ")) {
+        x.append(token)
+      }
+      x = x.distinct
+      for (item <- x) {
+        out.collect((value._1, item, 1))
       }
     }
 
