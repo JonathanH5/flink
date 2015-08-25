@@ -100,11 +100,11 @@ object CRQSelection {
       docRelated.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/docRelated",
         "\n", "\t", WriteMode.OVERWRITE)
 
-      //Calculate P_i(w_t|d_i) and append to wordRelated
+      //Calculate P_i(w_t|d_i) data set
       // 1. Map: calculate P_i(w_t|d_i)
-      val piSet: DataSet[(String, Int, String, Int, Double)] = wordRelated
+      val piSet: DataSet[(String, String, Int, Double, Int)] = wordRelated
         .map(new RichMapFunction[(String, Int, String, Int),
-        (String, Int, String, Int, Double)] {
+        (String, String, Int, Double, Int)] {
 
         var broadcastMap: mutable.Map[Int, Double] = mutable.Map[Int, Double]()
 
@@ -116,11 +116,12 @@ object CRQSelection {
           }
         }
 
-        override def map(value: (String, Int, String, Int)): (String, Int, String, Int, Double) = {
-          (value._1, value._2, value._3, value._4, value._4.toDouble / broadcastMap(value._2))
+        override def map(value: (String, Int, String, Int)): (String, String, Int, Double, Int) = {
+          (value._3, value._1, value._2, value._4.toDouble / broadcastMap(value._2), value._4)
         }
-      }).withBroadcastSet(docRelated, "docRelated") // (class -> document id
-                                                      // -> word -> word frequency -> P_i(w_t|d_i)
+      }).withBroadcastSet(docRelated, "docRelated")
+      // (word -> class -> document id ->  P_i(w_t|d_i) -> word frequency)
+
       piSet.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/piSet",
         "\n", "\t", WriteMode.OVERWRITE)
 
@@ -143,11 +144,12 @@ object CRQSelection {
       sumWordFreqAllClasses.writeAsText("/Users/jonathanhasenburg/Desktop/nbtemp/" +
         "sumWordFreqAllClasses", WriteMode.OVERWRITE)
 
+      /* This is wrong, because multiplikation with single values, not whole term
       //Calculate sum of all P_i(w_t|d_i) for all documents of class c_j
        // 1. Map: Remove word, documentID and word frequency
        // 2. Group-Reduce: sum the P_i for all documents of a class
       val sumPiForClass: DataSet[(String, Double)] = piSet
-        .map(line => (line._1, line._5))
+        .map(line => (line._1, line._4))
         .groupBy(0).sum(1) // class -> sum P_i(w_t|d_i) for all documents of class
 
       sumPiForClass.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/sumPiForClass",
@@ -162,24 +164,18 @@ object CRQSelection {
 
       sumPiAllClasses.writeAsText("/Users/jonathanhasenburg/Desktop/nbtemp/sumPiAllClasses",
         WriteMode.OVERWRITE)
-
-      //Create the crqModel by calculating log(P_j(w_t|d_i)) and log(P(w_t))
-      val crqModel: DataSet[(String, Int, String, Double, Double, Double)] = piSet
-        .map(new RichMapFunction[(String, Int, String, Int, Double),
+        */
+/*
+      //Create the crqModel by calculating P_j(w_t|d_i) and P(w_t)
+      val crqModel: DataSet[(String, String, Int, Double, Double, Double)] = piSet
+        .map(new RichMapFunction[(String, String, Int, Double,  Int),
         (String, Int, String, Double,  Double, Double)] {
 
-        var sumPiForClassMap: mutable.Map[String, Double] = mutable.Map[String, Double]()
-        var sumPiAllClassesSet: util.List[Double] = null
         var docRelatedMap: mutable.Map[Int, Double] = mutable.Map[Int, Double]()
         var sumWordFreqForClassMap: mutable.Map[String, Double] = mutable.Map[String, Double]()
         var sumWordFreqAllClassesSet: util.List[Double] = null
 
         override def open(config: Configuration): Unit = {
-          sumPiAllClassesSet = getRuntimeContext.getBroadcastVariable[Double]("sumPiAllClasses")
-          if (sumPiAllClassesSet.size() != 1) {
-            throw new RuntimeException("The sumPiAllClasses data set has the " +
-              "wrong size! This should not happen, it is. " + sumPiAllClassesSet.size())
-          }
 
           sumWordFreqAllClassesSet = getRuntimeContext
             .getBroadcastVariable[Double]("sumWordFreqAllClasses")
@@ -188,13 +184,7 @@ object CRQSelection {
               "wrong size! This should not happen, it is. " + sumWordFreqAllClassesSet.size())
           }
 
-          var collection = getRuntimeContext
-            .getBroadcastVariable[(String, Double)]("sumPiForClass").asScala
-          for (record <- collection) {
-            sumPiForClassMap.put(record._1, record._2.toDouble)
-          }
-
-          collection = getRuntimeContext
+          val collection = getRuntimeContext
             .getBroadcastVariable[(String, Double)]("sumWordFreqForClass").asScala
           for (record <- collection) {
             sumWordFreqForClassMap.put(record._1, record._2.toDouble)
@@ -209,11 +199,9 @@ object CRQSelection {
 
         override def map(value: (String, Int, String, Int, Double)):
           (String, Int, String, Double, Double, Double) = {
-          (value._1, value._2, value._3, value._5,
-            Math.log(sumPiForClassMap(value._1) * docRelatedMap(value._2)
-              / sumWordFreqForClassMap(value._1)),
-            Math.log(sumPiAllClassesSet.get(0) * docRelatedMap(value._2)
-              / sumWordFreqAllClassesSet.get(0)))
+          (value._1, value._2, value._3, value._4,
+            value._4 * docRelatedMap(value._2) / sumWordFreqForClassMap(value._1),
+            value._4 * docRelatedMap(value._2) / sumWordFreqAllClassesSet.get(0))
         }
       }).withBroadcastSet(sumPiForClass, "sumPiForClass")
         .withBroadcastSet(sumPiAllClasses, "sumPiAllClasses")
@@ -225,8 +213,7 @@ object CRQSelection {
 
       crqModel.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/crqModel",
         "\n", "\t", WriteMode.OVERWRITE)
-
-
+*/
     }
   }
 

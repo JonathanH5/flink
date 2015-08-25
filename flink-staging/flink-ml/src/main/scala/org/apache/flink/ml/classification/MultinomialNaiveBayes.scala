@@ -18,9 +18,9 @@
 
 package org.apache.flink.ml.classification
 
-import java.util
+import java.{lang, util}
 
-import org.apache.flink.api.common.functions.{ReduceFunction, FlatMapFunction, RichMapFunction}
+import org.apache.flink.api.common.functions._
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.core.fs.FileSystem.WriteMode
@@ -31,6 +31,7 @@ import org.apache.flink.util.Collector
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.Map
 
 /**
  * While building the model different approaches need to be compared.
@@ -350,9 +351,6 @@ object MultinomialNaiveBayes {
           .flatMap(new SingleDistinctWordSplitter())
           .groupBy(0, 1)
           .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
-
-        singleWordsInClass.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/singleWordsInClass",
-          "\n", "|", WriteMode.OVERWRITE)
       }
 
       //END SCHNEIDER/RENNIE 1
@@ -418,7 +416,7 @@ object MultinomialNaiveBayes {
 
       //RENNIE 1: transform document frequency
         //for this, the improvementData set must be set
-        //calculate (word -> log number of documents in all classes / word frequency in all classes)
+        //calculate (word -> log number of documents in all classes / docs with that word)
 
       val r1 = resultingParameters(R1)
 
@@ -427,9 +425,6 @@ object MultinomialNaiveBayes {
           .reduce((line1, line2) => (line1._1, line1._2 + line2._2))
           .map(line => line._2) // (count of all documents)
 
-        totalDocumentCount.writeAsText("/Users/jonathanhasenburg/Desktop/nbtemp/totalDocumentCount",
-          WriteMode.OVERWRITE)
-
         //number of occurences over all documents of all classes
         val wordCountTotal = input
           .flatMap(new SingleDistinctWordSplitter())
@@ -437,9 +432,6 @@ object MultinomialNaiveBayes {
           .groupBy(0)
           .reduce((line1, line2) => (line1._1, line1._2 + line2._2))
            // (word -> count of documents with that word)
-
-        wordCountTotal.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/wordCountTotal",
-          "\n", "|", WriteMode.OVERWRITE)
 
         val improvementData = wordCountTotal.map(new RichMapFunction[(String, Int),
           (String, Double)] {
@@ -458,9 +450,6 @@ object MultinomialNaiveBayes {
             (value._1, Math.log(broadcastSet.get(0) / value._2))
           }
         }).withBroadcastSet(totalDocumentCount, "totalDocumentCount")
-
-        improvementData.writeAsCsv("/Users/jonathanhasenburg/Desktop/nbtemp/improvementData",
-          "\n", "|", WriteMode.OVERWRITE)
 
         instance.improvementData = Some(improvementData)
       }
@@ -572,49 +561,205 @@ object MultinomialNaiveBayes {
           (line1._1, line1._2, line1._3 + line2._3)) //(id -> class -> sum(log(P(w|c)) */
       }
 
+      var sumPwcNotFoundWords: DataSet[(Int, String, Double)] = null
+
+      if (sr1 == 0 && r1 == 0) {
+        //calculate sumwpc for words that are not in model in that class
+        // 1. Map: Discard word and log(P(w|c) from foundWords
+        // 2. Group-Reduce: calculate sum count of found words for each document,
+        //  class pair (id -> class -> sum(wordCount))
+        // 3. Join: with wordsInText on id, to get the count of all words per document
+        // 4. Map: calculate sumPWcNotFound (id -> class ->
+        //  (all words in document - found word in document) *
+        //  log(P(w|c) not in class (provided by broadcast))
+        sumPwcNotFoundWords = foundWords
+          .map(line => (line._1, line._2, line._4))
+          .groupBy(0, 1)
+          .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
+          .join(wordsInText).where(0).equalTo(0) {
+          (foundW, wordsIT) => (foundW._1, foundW._2, foundW._3, wordsIT._2)
+        }.map(new RichMapFunction[(Int, String, Int, Int), (Int, String, Double)] {
+
+          var broadcastMap: mutable.Map[String, Double] = mutable
+            .Map[String, Double]() //class -> log(P(w|c) not found word in class)
+
+          override def open(config: Configuration): Unit = {
+            val collection = getRuntimeContext
+              .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+              .asScala
+            for (record <- collection) {
+              broadcastMap.put(record._1, record._3)
+            }
+          }
+
+          override def map(value: (Int, String, Int, Int)): (Int, String, Double) = {
+            (value._1, value._2, (value._4 - value._3) * broadcastMap(value._2))
+          }
+        }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
+
+      } else {
+        /** if the word frequency is changed (as in SR1 = 1, SR1 = 2, R1 = 1), the
+          * sumPwcNotFoundWords can not be calculated as above. They must be calculated the same way
+          * as for the sumPwcFoundWords data set (because each word frequency for each word is
+          * important).
+          *
+          * Prepare foundWords data set for differenz
+          * 1. Map: discard log(P(w|c) and wordCount from foundWords (id -> class -> word)
+          * = all words that are known in each document for each class
+          *
+          * Prepare wordsAndCounts data set for difference
+          * 1. FlatMap:create for every tuple a (document id -> class -> word -> word count)
+          *    tuple for every class
+          *
+          * Create notFoundWords data set
+          * 1: CoGroup: Only tuples (id, class, word) that are not in preparedFoundWords
+          *
+          * The result is a data set, that contains all words for each document for each class
+          * that are not part of that class and the word counts.
+          *
+          * Then calcualte sumPwcNotfoundWords
+          */
+
+        val preparedFoundWords: DataSet[(Int, String, String)] = foundWords
+          .map(line => (line._1, line._2, line._3))
+
+        val wordsAndCountsExtended: DataSet[(Int, String, String, Int)] = wordsAndCount
+          .flatMap(new Extender())
+          .withBroadcastSet(classRelatedModelData, "classRelatedModelData")
+
+        val notFoundWords: DataSet[(Int, String, String, Int)] = wordsAndCountsExtended
+          .coGroup(preparedFoundWords).where(0, 1, 2)
+          .equalTo(0, 1, 2)(new DifferenceCoGrouper) //(id -> class -> word -> word count)
+
+        if ((sr1 == 1 && r1 == 0) || (sr1 == 2 && r1 == 0)) {
+          //calculate the sum of all Pwc for every not found word (id -> class -> sumPwcNotFound)
+          // 1. Map: calculate the pwc value for every word (id -> class -> pwc)
+          // 2. Sum: Sum these pwc values for each class and document
+          sumPwcNotFoundWords = notFoundWords
+            .map(new RichMapFunction[(Int, String, String, Int), (Int, String, Double)] {
+
+            var broadcastMap: mutable.Map[String, Double] = mutable
+              .Map[String, Double]() //class -> log(P(w|c) not found word in class)
+
+            override def open(config: Configuration): Unit = {
+              val collection = getRuntimeContext
+                .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+                .asScala
+              for (record <- collection) {
+                broadcastMap.put(record._1, record._3)
+              }
+            }
+
+            override def map(value: (Int, String, String, Int)): (Int, String, Double) = {
+              if (sr1 == 1 && r1 == 0) {
+                //same as sr1 == 0, but there is no multiplication with the word counts
+                return (value._1, value._2, broadcastMap(value._2))
+              } else if (sr1 == 2 && r1 == 0) {
+                //same es sr1 == 0, but multiplication with log(wordcount + 1)
+                return (value._1, value._2, Math.log(value._4 + 1) * broadcastMap(value._2))
+              }
+              throw new RuntimeException("sumPwcNotFound could not be calculated because you" +
+                "choosed a not allowed parameter combination.")
+            }
+          }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
+            .groupBy(0, 1).sum(2)
+        } else if ((sr1 == 0 && r1 == 1) || (sr1 == 2 && r1 == 1)) {
+
+          //same as r1 = 0, but the word frequency is multiplied with
+          //log (n_d(c) / n_d(w_t)) for that a join with the improvementData data set must be
+          //performed first to get the needed additional information.
+          // 1. Join with improvement data: (id -> class ->  word count ->
+            // log (number of documents in class / word frequency in all classes))
+          // 2a. Map: (id -> class -> word count * log (see above) * log(P(w|c))
+          // 2b. Map: (id -> class -> log(word count + 1) * log (see above) * log(P(w|c))
+          sumPwcNotFoundWords = notFoundWords
+            .join(improvementData).where(2).equalTo(0) {
+            (nf, imp) => (nf._1, nf._2, nf._4, imp._2)
+          }.map(new RichMapFunction[(Int, String, Int, Double), (Int, String, Double)] {
+
+            var broadcastMap: mutable.Map[String, Double] = mutable
+              .Map[String, Double]() //class -> log(P(w|c) not found word in class)
+
+            override def open(config: Configuration): Unit = {
+              val collection = getRuntimeContext
+                .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+                .asScala
+              for (record <- collection) {
+                broadcastMap.put(record._1, record._3)
+              }
+            }
+
+            override def map(value: (Int, String, Int, Double)): (Int, String, Double) = {
+              if (sr1 == 0 && r1 == 1) {
+                return (value._1, value._2, value._3 * value._4 * broadcastMap(value._2))
+              } else if (sr1 == 2 && r1 == 1) {
+                return (value._1, value._2, Math.log(value._3 + 1)
+                  * value._4 * broadcastMap(value._2))
+              }
+              throw new RuntimeException("sumPwcNotFound could not be calculated because you" +
+                "choosed a not allowed parameter combination.")
+            }
+          }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
+            .groupBy(0, 1).sum(2) //(id -> class -> sum(log(P(w|c))
+        }
+      }
+
+      var sumPwc: DataSet[(Int, String, Double)] = null
+
+      if (sr1 == 0 && r1 == 0) {
+        //sum those pwc sums
+        // 1. Join sumPwcFoundWords and sumPwcNotFoundWords
+        // 2. Map: add sums from found words and sums from not found words
+        sumPwc = sumPwcFoundWords
+          .join(sumPwcNotFoundWords).where(0, 1).equalTo(0, 1) {
+          (found, notfound) => (found._1, found._2, found._3 + notfound._3)
+        } //(id -> class name -> sum log(p(w|c)))
+      } else {
+        //sum those pwc sums
+        // 1. CoGroup Found with NotFound on document id
+        // add values together, when both have a same class
+        // submit tuple, when a class misses for the other one
+        sumPwc = sumPwcFoundWords.coGroup(sumPwcNotFoundWords)
+          .where(0).equalTo(0) {
+          (foundVs, notFoundVs, out: Collector[(Int, String, Double)]) =>
+            //1. Create two Maps
+            var foundMap = Map[String, Double]()
+            var notFoundMap = Map[String, Double]()
+
+            var currentID = -1
+
+            for (foundV <- foundVs) {
+              if (currentID == -1) {
+                currentID = foundV._1
+              }
+              foundMap += foundV._2 -> foundV._3
+            }
+            for (notFoundV <- notFoundVs) {
+              notFoundMap += notFoundV._2 -> notFoundV._3
+            }
+            //2. Go through these maps and collect tuples
+            for (tuple <- foundMap) {
+              if (notFoundMap.contains(tuple._1)) {
+                out.collect(currentID, tuple._1, tuple._2 + notFoundMap(tuple._1))
+                notFoundMap.remove(tuple._1)
+              } else {
+                out.collect(currentID, tuple._1, tuple._2)
+              }
+            }
+            for (tuple <- notFoundMap) {
+              if (foundMap.contains(tuple._1)) {
+                out.collect(currentID, tuple._1, tuple._2 + foundMap(tuple._1))
+              } else {
+                out.collect(currentID, tuple._1, tuple._2)
+              }
+            }
+
+
+        }
+      }
+
       //END RENNIE 1
       //END SCHNEIDER/RENNIE 1
-
-      //calculate sumwpc for words that are not in model in that class
-      // 1. Map: Discard word and log(P(w|c) from foundWords
-      // 2. Group-Reduce: calculate sum count of found words for each document,
-      //  class pair (id -> class -> sum(wordCount))
-      // 3. Join: with wordsInText on id, to get the count of all words per document
-      // 4. Map: calculate sumPWcNotFound (id -> class ->
-      //  (all words in document - found word in document) *
-      //  log(P(w|c) not in class (provided by broadcast)
-      val sumPwcNotFoundWords: DataSet[(Int, String, Double)] = foundWords
-        .map(line => (line._1, line._2, line._4))
-        .groupBy(0, 1)
-        .reduce((line1, line2) => (line1._1, line1._2, line1._3 + line2._3))
-        .join(wordsInText).where(0).equalTo(0) {
-        (foundW, wordsIT) => (foundW._1, foundW._2, foundW._3, wordsIT._2)
-      }.map(new RichMapFunction[(Int, String, Int, Int), (Int, String, Double)] {
-
-        var broadcastMap: mutable.Map[String, Double] = mutable
-          .Map[String, Double]() //class -> log(P(w|c) not found word in class)
-
-        override def open(config: Configuration): Unit = {
-          val collection = getRuntimeContext
-            .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
-            .asScala
-          for (record <- collection) {
-            broadcastMap.put(record._1, record._3)
-          }
-        }
-
-        override def map(value: (Int, String, Int, Int)): (Int, String, Double) = {
-          (value._1, value._2, (value._4 - value._3) * broadcastMap(value._2))
-        }
-      }).withBroadcastSet(classRelatedModelData, "classRelatedModelData")
-
-      //sum those pwc sums
-      // 1. Join sumPwcFoundWords and sumPwcNotFoundWords
-      // 2. Map: add sums from found words and sums from not found words
-      val sumPwc: DataSet[(Int, String, Double)] = sumPwcFoundWords
-        .join(sumPwcNotFoundWords).where(0, 1).equalTo(0, 1) {
-        (found, notfound) => (found._1, found._2, found._3 + notfound._3)
-      } //(id -> class name -> sum log(p(w|c)))
 
       //SCHNEIDER 1: ignore P(c_j) in cMAP formula
       val s1 = resultingParameters(S1)
@@ -648,7 +793,6 @@ object MultinomialNaiveBayes {
       // 1. Reduce: keep only highest probability
       posterior.groupBy(0).reduce(new CalculateReducer())
         .map(line => (line._1, line._2)) //(id -> class)
-
 
 
     }
@@ -694,9 +838,31 @@ object MultinomialNaiveBayes {
         out.collect((value._1, item, 1))
       }
     }
+  }
 
-    // Can be implemented via: input.flatMap{ pair => pair._2.split(" ")
-    // .map{ token => (pair._1, token ,1)} }
+  /**
+   * Used to extend the wordsAndCount data set. Transforms (id -> word -> word count) into
+   * (id -> class -> word -> word count) for each possible class.
+   */
+  class Extender() extends RichFlatMapFunction[(Int, String, Int), (Int, String, String, Int)] {
+
+    var broadcastSet = Set[String]()
+
+    override def open(config: Configuration): Unit = {
+      val collection = getRuntimeContext
+        .getBroadcastVariable[(String, Double, Double)]("classRelatedModelData")
+        .asScala
+      for (record <- collection) {
+        broadcastSet += record._1
+      }
+    }
+
+    override def flatMap(value: (Int, String, Int), out: Collector[(Int, String, String, Int)]):
+      Unit = {
+      for (c: String <- broadcastSet) {
+        out.collect((value._1, c, value._2, value._3))
+      }
+    }
   }
 
   /**
@@ -710,6 +876,21 @@ object MultinomialNaiveBayes {
       } else {
         value2
       }
+    }
+  }
+
+  /**
+   * Difference of two data sets
+   */
+  class DifferenceCoGrouper extends CoGroupFunction[(Int, String, String, Int),
+    (Int, String, String), (Int, String, String, Int)] {
+    override def coGroup(first: lang.Iterable[(Int, String, String, Int)],
+                         second: lang.Iterable[(Int, String, String)],
+                         out: Collector[(Int, String, String, Int)]): Unit = {
+      if (!second.iterator().hasNext()) {
+        out.collect(first.iterator().next())
+      }
+
     }
   }
 
