@@ -726,6 +726,7 @@ object MultinomialNaiveBayes {
             var foundMap = Map[String, Double]()
             var notFoundMap = Map[String, Double]()
 
+            //TODO set currentID from the very beginning to correct value
             var currentID = -1
 
             for (foundV <- foundVs) {
