@@ -365,7 +365,8 @@ object MultinomialNaiveBayes {
 
           //Join the singleWordsInClass data set with the allWordsInClass data set to use the
           //information for the calculation of p(w|c).
-          val wordsInClass = singleWordsInClass.join(allWordsInClass).where(0).equalTo(0) {
+          val wordsInClass = singleWordsInClass
+            .join(allWordsInClass).where(0).equalTo(0) {
             (single, all) => (single._1, single._2, single._3, all._2)
           } // (class name -> word -> count of that word -> count of all words in that class)
 
@@ -407,7 +408,8 @@ object MultinomialNaiveBayes {
 
       //store all class related information in one data set
       // 1. Join: P(c) data set and P(w|c) data set not in class and calculate logarithms
-      val classRelatedModelData = pc.join(pwcNotInClass).where(0).equalTo(0) {
+      val classRelatedModelData = pc.join(pwcNotInClass)
+        .where(0).equalTo(0) {
         (line1, line2) => (line1._1, Math.log(line1._2), Math.log(line2._2))
       } // (class name -> log(P(c)) -> log(P(w|c) not in class))
 
